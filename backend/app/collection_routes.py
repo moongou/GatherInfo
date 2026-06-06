@@ -17,7 +17,9 @@ from sqlalchemy.orm import Session
 import httpx
 from pydantic import BaseModel
 from app.collection_schemas import (
-    AutoDiscoverResult, BatchGenerateRequest, BatchGenerateResult,
+    ItemDeleteRequest,
+    AutoDiscoverResult, BatchOut, BatchRunOut, ActiveRunOut, BatchGenerateRequest, BatchGenerateResult,
+    ItemDeleteRequest,
     CollectRequest, CollectResultOut, ConnectorInfo, DiscoveredProvider,
     ItemListOut, ItemOut,
     ListModelsResult, ModelConfigCreate, ModelConfigOut, ModelConfigUpdate, ModelTestResult,
@@ -394,6 +396,21 @@ async def run_collection(data: CollectRequest, db: Session = Depends(get_db)):
             results = await engine.collect_topic(data.topic_id)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        # Auto-generate report if enabled on the topic
+        try:
+            topic = db.query(Topic).filter(Topic.id == data.topic_id).first()
+            if topic and topic.auto_report:
+                from app.report_engine import generate_report as auto_gen
+                logger.info("Auto-report triggered for topic %s after manual collection", data.topic_id)
+                # Fire-and-forget: run in background to not block the API response
+                import asyncio
+                asyncio.ensure_future(auto_gen(
+                    topic_id=data.topic_id,
+                    model_id=topic.auto_report_model_id,
+                    collection_run_id=topic.last_collection_run_id,
+                ))
+        except Exception as exc:
+            logger.warning("Auto-report trigger failed for %s: %s", data.topic_id, exc)
     elif data.source_id:
         keywords = data.keywords or []
         r = await engine.collect_from_source(data.source_id, keywords)
@@ -452,6 +469,125 @@ def list_runs(
         q = q.filter(CollectionRun.source_id == source_id)
     return q.order_by(CollectionRun.created_at.desc()).limit(limit).all()
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Collection Batch / History
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/runs/batches", response_model=list[BatchOut])
+def list_batches(
+    topic_id: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """List collection runs grouped by batch_id (same execution → same batch)."""
+    from sqlalchemy import func as sa_func, text as sa_text
+
+    # Find the most recent batches (distinct batch_ids)
+    q = db.query(
+        CollectionRun.batch_id,
+        sa_func.max(CollectionRun.created_at).label("last_created"),
+    )
+    if topic_id:
+        q = q.filter(CollectionRun.topic_id == topic_id)
+    q = q.filter(CollectionRun.batch_id.isnot(None))
+    q = q.group_by(CollectionRun.batch_id).order_by(sa_text("last_created DESC")).limit(limit)
+    batch_rows = q.all()
+
+    batches: list[BatchOut] = []
+    for batch_id, _ in batch_rows:
+        runs = db.query(CollectionRun).filter(
+            CollectionRun.batch_id == batch_id,
+        ).order_by(CollectionRun.source_id).all()
+
+        if not runs:
+            continue
+
+        topic = None
+        if runs[0].topic_id:
+            topic = db.query(Topic).filter(Topic.id == runs[0].topic_id).first()
+
+        started_at = min((r.created_at for r in runs if r.created_at), default=None)
+        completed_at = max((r.completed_at for r in runs if r.completed_at), default=None)
+
+        run_outs: list[BatchRunOut] = []
+        for r in runs:
+            src = db.query(SourceConfig).filter(SourceConfig.id == r.source_id).first()
+            run_outs.append(BatchRunOut(
+                id=r.id, source_id=r.source_id,
+                topic_id=r.topic_id, status=r.status.value if r.status else "unknown",
+                items_new=r.items_new or 0, items_found=r.items_found or 0,
+                items_failed=r.items_failed or 0,
+                started_at=r.started_at.isoformat() if r.started_at else None,
+                completed_at=r.completed_at.isoformat() if r.completed_at else None,
+                duration_ms=r.duration_ms,
+                error_log=r.error_log,
+                source_name=src.name if src else r.source_id,
+            ))
+
+        error_count = sum(1 for r in runs if r.status and r.status.value == "failed")
+        has_running = any(r.status and r.status.value in ("running", "pending") for r in runs)
+        status = "running" if has_running else ("partial" if error_count > 0 and error_count < len(runs) else ("failed" if error_count == len(runs) else "completed"))
+
+        batch_label = None
+        if topic:
+            ts = started_at.strftime("%Y-%m-%d %H:%M") if started_at else ""
+            batch_label = f"{topic.name}_{ts}"
+        elif runs[0].source_id:
+            ts = started_at.strftime("%Y-%m-%d %H:%M") if started_at else ""
+            batch_label = f"{runs[0].source_id}_{ts}"
+
+        batches.append(BatchOut(
+            batch_id=batch_id,
+            topic_id=runs[0].topic_id,
+            topic_name=topic.name if topic else None,
+            batch_label=batch_label,
+            status=status,
+            total_items=sum(r.items_found or 0 for r in runs),
+            total_new=sum(r.items_new or 0 for r in runs),
+            started_at=started_at.isoformat() if started_at else None,
+            completed_at=completed_at.isoformat() if completed_at else None,
+            source_count=len(runs),
+            runs=run_outs,
+        ))
+
+    return batches
+
+
+@router.get("/runs/active", response_model=list[ActiveRunOut])
+def list_active_runs(db: Session = Depends(get_db)):
+    """List currently running/pending collection runs."""
+    from app.models import JobStatus
+
+    runs = db.query(CollectionRun).filter(
+        CollectionRun.status.in_([JobStatus.RUNNING, JobStatus.PENDING]),
+    ).order_by(CollectionRun.created_at.desc()).limit(20).all()
+
+    result: list[ActiveRunOut] = []
+    for r in runs:
+        src = db.query(SourceConfig).filter(SourceConfig.id == r.source_id).first()
+        topic = db.query(Topic).filter(Topic.id == r.topic_id).first() if r.topic_id else None
+        duration = None
+        if r.started_at and not r.completed_at:
+            from datetime import timezone
+            duration = int((datetime.now(timezone.utc) - r.started_at).total_seconds())
+
+        result.append(ActiveRunOut(
+            id=r.id, source_id=r.source_id,
+            source_name=src.name if src else r.source_id,
+            topic_id=r.topic_id,
+            topic_name=topic.name if topic else None,
+            status=r.status.value if r.status else "unknown",
+            keywords_used=r.keywords_used or [],
+            items_found=r.items_found or 0,
+            items_new=r.items_new or 0,
+            started_at=r.started_at.isoformat() if r.started_at else None,
+            duration_seconds=duration,
+            batch_id=r.batch_id,
+        ))
+
+    return result
+
 @router.get("/items", response_model=ItemListOut)
 def list_items(
     topic_id: str | None = None,
@@ -460,6 +596,7 @@ def list_items(
     tag: str | None = None,
     status: str | None = None,
     language: str | None = None,
+    run_id: str | None = None,
     q: str | None = Query(default=None, description="Full-text search in title/content"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -477,6 +614,8 @@ def list_items(
         query = query.filter(CollectedItem.status == status)
     if language:
         query = query.filter(CollectedItem.language == language)
+    if run_id:
+        query = query.filter(CollectedItem.run_id == run_id)
     if q:
         query = query.filter(
             (CollectedItem.title.ilike(f"%{q}%")) |
@@ -533,6 +672,53 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
         collected_at=it.collected_at, published_at=it.published_at,
     )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tags
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/items/ids")
+def list_item_ids(
+    topic_id: str | None = None,
+    source_id: str | None = None,
+    category: str | None = None,
+    tag: str | None = None,
+    status: str | None = None,
+    language: str | None = None,
+    run_id: str | None = None,
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return only item IDs matching filters (for select-all in UI)."""
+    query = db.query(CollectedItem.id)
+    if topic_id: query = query.filter(CollectedItem.topic_id == topic_id)
+    if source_id: query = query.filter(CollectedItem.source_id == source_id)
+    if category: query = query.filter(CollectedItem.category == category)
+    if status: query = query.filter(CollectedItem.status == status)
+    if language: query = query.filter(CollectedItem.language == language)
+    if run_id: query = query.filter(CollectedItem.run_id == run_id)
+    if q:
+        query = query.filter(
+            (CollectedItem.title.ilike(f"%{q}%")) |
+            (CollectedItem.content.ilike(f"%{q}%"))
+        )
+    if tag:
+        query = query.filter(CollectedItem.tags.any(Tag.id == tag))
+    total = query.count()
+    ids = [row[0] for row in query.all()]
+    return {"ids": ids, "total": total, "matching": len(ids)}
+
+@router.post("/items/batch-delete")
+def batch_delete_items(data: ItemDeleteRequest, db: Session = Depends(get_db)):
+    """Delete multiple collected items by IDs."""
+    deleted = 0
+    for item_id in data.item_ids:
+        item = db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
+        if item:
+            db.delete(item)
+            deleted += 1
+    db.commit()
+    return {"deleted": deleted, "total": len(data.item_ids)}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Tags

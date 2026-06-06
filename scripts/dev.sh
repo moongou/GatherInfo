@@ -26,10 +26,10 @@ cleanup() {
   fi
 }
 
-# ── Start backend (uvicorn on port 8108) ─────────────────────────────────────
-echo "[dev] Starting backend on port 8108 ..."
+# ── Start backend (uvicorn on port 8109) ─────────────────────────────────────
+echo "[dev] Starting backend on port 8109 ..."
 backend/.venv/bin/python -m uvicorn app.main:create_app \
-  --factory --host 127.0.0.1 --port 8108 --app-dir backend \
+  --factory --host 127.0.0.1 --port 8109 --app-dir backend \
   > "$PROJECT_DIR/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo "$BACKEND_PID" >> "$PID_FILE"
@@ -48,7 +48,7 @@ while true; do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
     echo "[dev] Backend exited — restarting ..."
     backend/.venv/bin/python -m uvicorn app.main:create_app \
-      --factory --host 127.0.0.1 --port 8108 --app-dir backend \
+      --factory --host 127.0.0.1 --port 8109 --app-dir backend \
       > "$PROJECT_DIR/logs/backend.log" 2>&1 &
     BACKEND_PID=$!
     echo "$BACKEND_PID" >> "$PID_FILE"

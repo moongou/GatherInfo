@@ -31,6 +31,7 @@ class CollectionEngine:
     async def collect_from_source(
         self, source_id: str, keywords: list[str], topic_id: str | None = None,
         window_start: "datetime | None" = None, window_end: "datetime | None" = None,
+        batch_id: str | None = None,
     ) -> CollectResult:
         """Collect from one source with given keywords.
 
@@ -56,6 +57,7 @@ class CollectionEngine:
             window_start=window_start,
             window_end=window_end,
         )
+        run.batch_id = batch_id
         self.db.add(run)
         self.db.commit()
 
@@ -69,7 +71,7 @@ class CollectionEngine:
                                  status=JobStatus.FAILED, items=[], error_log=[str(exc)])
 
         result = await connector.execute(run, keywords)
-        self._persist_items(result.items, source.id, run.id, topic_id, window_start)
+        self._persist_items(result.items, source.id, run.id, topic_id, window_start, keywords)
         self._update_source(source, len(result.items))
         self.db.commit()
         return result
@@ -92,9 +94,13 @@ class CollectionEngine:
         window_end = utc_now()
         window_start = window_end - timedelta(days=window_days) if window_days > 0 else None
 
+        # Generate a shared batch_id for all runs in this topic collection
+        from uuid import uuid4
+        batch_id = f"batch-{uuid4().hex[:12]}"
+
         # Parallel collection — topic_id flows through into runs and items
         tasks = [
-            self.collect_from_source(sid, keywords, topic.id, window_start, window_end)
+            self.collect_from_source(sid, keywords, topic.id, window_start, window_end, batch_id)
             for sid in source_ids
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -225,7 +231,8 @@ class CollectionEngine:
         return self.db.query(SourceConfig).filter(SourceConfig.is_active == True).all()
 
     def _persist_items(self, items: list[FetchItem], source_id: str, run_id: str,
-                       topic_id: str | None = None, window_start: "datetime | None" = None):
+                       topic_id: str | None = None, window_start: "datetime | None" = None,
+                       keywords: list[str] | None = None):
         for fi in items:
             # Skip items whose known publication date is older than the window.
             # Items without a published_at are always kept (date unknown).
@@ -234,6 +241,13 @@ class CollectionEngine:
                 if pub.tzinfo is None:
                     pub = pub.replace(tzinfo=timezone.utc)
                 if pub < window_start:
+                    continue
+
+            # Keyword relevance filtering: skip items that don't match any keyword
+            if keywords:
+                text = f"{fi.title} {fi.content or ''} {fi.summary or ''}"
+                matched = any(kw.lower() in text.lower() for kw in keywords if kw)
+                if not matched:
                     continue
             item_id = fi.item_id(source_id)
             try:

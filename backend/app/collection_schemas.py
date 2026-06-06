@@ -497,6 +497,10 @@ class AutoDiscoverResult(BaseModel):
 # System Config (报告设置等全局配置)
 # ═════════════════════════════════════════════════════════════════════════
 
+
+class ItemDeleteRequest(BaseModel):
+    item_ids: list[str] = Field(min_length=1, max_length=500)
+
 class SystemConfigOut(BaseModel):
     report_title_format: str = "{topic}_情报报告_{date}"
     report_output_dir: str | None = None
@@ -511,3 +515,54 @@ class SystemConfigUpdate(BaseModel):
     report_dir_pattern: str | None = Field(default=None, min_length=1, max_length=50)
     report_formats: list[str] | None = Field(default=None, min_length=1, max_length=10)
 
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Collection Batch / History
+# ════════════════════════════════════════════════════════════════════════
+
+class BatchRunOut(BaseModel):
+    """A single collection run within a batch."""
+    id: str
+    source_id: str
+    topic_id: str | None = None
+    status: str
+    items_new: int = 0
+    items_found: int = 0
+    items_failed: int = 0
+    started_at: IsoDT = None
+    completed_at: IsoDT = None
+    duration_ms: int | None = None
+    error_log: list | None = None
+    source_name: str | None = None
+
+
+class BatchOut(BaseModel):
+    """A batch = collection runs sharing the same batch_id."""
+    batch_id: str
+    topic_id: str | None = None
+    topic_name: str | None = None
+    batch_label: str | None = None
+    status: str
+    total_items: int = 0
+    total_new: int = 0
+    started_at: IsoDT = None
+    completed_at: IsoDT = None
+    source_count: int = 0
+    runs: list[BatchRunOut] = []
+
+
+class ActiveRunOut(BaseModel):
+    """Currently executing collection run, shown on the history UI."""
+    id: str
+    source_id: str
+    source_name: str | None = None
+    topic_id: str | None = None
+    topic_name: str | None = None
+    status: str
+    keywords_used: list[str] = []
+    items_found: int = 0
+    items_new: int = 0
+    started_at: IsoDT = None
+    duration_seconds: int | None = None
+    batch_id: str | None = None

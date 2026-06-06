@@ -77,10 +77,21 @@ class TavilyCollector(BaseCollector):
                         content = r.get("content", "")
                         url = r.get("url", "")
 
+                        # Parse published_date if available (for window enforcement)
+                        pub_date = r.get("published_date", None)
+                        if pub_date and isinstance(pub_date, str):
+                            try:
+                                from datetime import timezone, datetime
+                                dt = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
+                                pub_date = dt.isoformat()
+                            except (ValueError, TypeError):
+                                pub_date = None
+
                         items.append(FetchItem(
                             title=title,
                             content=content,
                             url=url,
+                            published_at=pub_date,
                             summary=content[:500] if content else None,
                             language=_detect_lang(url, content),
                             category=_infer_category(title, content),

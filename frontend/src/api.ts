@@ -93,6 +93,16 @@ export const collectTopic = (topicId: string) =>
   post<CollectResult[]>("/collect", { topic_id: topicId });
 export const collectSource = (sourceId: string, keywords?: string[]) =>
   post<CollectResult[]>("/collect", { source_id: sourceId, keywords });
+
+// ── Collection Batches / History ─────────────────────────────────────────
+
+export const fetchBatches = (topicId?: string, limit = 20) =>
+  get<import("./types").BatchOut[]>("/runs/batches", {
+    ...(topicId ? { topic_id: topicId } : {}),
+    limit: String(limit),
+  } as Record<string, string>);
+export const fetchActiveRuns = () => get<import("./types").ActiveRunOut[]>("/runs/active");
+
 export const fetchRuns = (topicId?: string, limit = 20) =>
   get<CollectRun[]>("/runs", {
     ...(topicId ? { topic_id: topicId } : {}),
@@ -108,6 +118,7 @@ export interface ItemFilters {
   tag?: string;
   status?: string;
   language?: string;
+  run_id?: string;
   q?: string;
   page?: number;
   page_size?: number;
@@ -126,6 +137,17 @@ export const fetchItems = (filters: ItemFilters = {}) =>
     page_size: String(filters.page_size ?? 50),
   } as Record<string, string>);
 export const fetchItem = (id: string) => get<CollectedItem>(`/items/${id}`);
+export const fetchItemIds = (filters: ItemFilters) =>
+  get<{ids: string[]; total: number; matching: number}>("/items/ids", {
+    ...(filters.topic_id ? { topic_id: filters.topic_id } : {}),
+    ...(filters.source_id ? { source_id: filters.source_id } : {}),
+    ...(filters.category ? { category: filters.category } : {}),
+    ...(filters.tag ? { tag: filters.tag } : {}),
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.language ? { language: filters.language } : {}),
+    ...(filters.run_id ? { run_id: filters.run_id } : {}),
+    ...(filters.q ? { q: filters.q } : {}),
+  } as Record<string, string>);
 
 // ── Tags ────────────────────────────────────────────────────────────────
 
@@ -189,6 +211,9 @@ export const batchGenerateReports = (
     ...(modelId ? { model_id: modelId } : {}),
     ...(collectionRunIds ? { collection_run_ids: collectionRunIds } : {}),
   });
+export const batchDeleteItems = (itemIds: string[]) =>
+  post<{deleted: number; total: number}>("/items/batch-delete", { item_ids: itemIds });
+
 export const deleteReport = (id: string) => del(`/reports/${id}`);
 export const exportReport = (id: string) =>
   post<import("./types").Report>(`/reports/${id}/export`, {});

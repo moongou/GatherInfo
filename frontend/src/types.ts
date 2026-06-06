@@ -303,3 +303,50 @@ export interface ListModelsResult {
   provider_type: string;
   current_model: string;
 }
+
+
+// ── Collection Batch / History ──────────────────────────────────────────
+
+export interface BatchRunOut {
+  id: string;
+  source_id: string;
+  topic_id: string | null;
+  status: string;
+  items_new: number;
+  items_found: number;
+  items_failed: number;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  error_log: string[] | null;
+  source_name: string | null;
+}
+
+export interface BatchOut {
+  batch_id: string;
+  topic_id: string | null;
+  topic_name: string | null;
+  batch_label: string | null;
+  status: string;
+  total_items: number;
+  total_new: number;
+  started_at: string | null;
+  completed_at: string | null;
+  source_count: number;
+  runs: BatchRunOut[];
+}
+
+export interface ActiveRunOut {
+  id: string;
+  source_id: string;
+  source_name: string | null;
+  topic_id: string | null;
+  topic_name: string | null;
+  status: string;
+  keywords_used: string[];
+  items_found: number;
+  items_new: number;
+  started_at: string | null;
+  duration_seconds: number | null;
+  batch_id: string | null;
+}

@@ -11,10 +11,11 @@ import { TagsPage } from "./components/TagsPage";
 import { SchedulesPage } from "./components/SchedulesPage";
 import { ModelConfigPage } from "./components/ModelConfigPage";
 import { SettingsPage } from "./components/SettingsPage";
+import { HistoryPage } from "./components/HistoryPage";
 import { ReportsPage } from "./components/ReportsPage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-type ViewId = "dashboard" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "settings";
+type ViewId = "dashboard" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings";
 
 interface ViewDef {
   id: ViewId;
@@ -31,6 +32,7 @@ const views: ViewDef[] = [
   { id: "reports", label: "智能报告", icon: FileText },
   { id: "models", label: "模型配置", icon: Cpu },
   { id: "schedules", label: "周期调度", icon: Clock },
+  { id: "history", label: "采集历史", icon: Clock },
   { id: "settings", label: "系统配置", icon: Settings },
 ];
 
@@ -76,6 +78,7 @@ export function App() {
              {view === "tags" && <TagsPage />}
              {view === "reports" && <ReportsPage />}
              {view === "models" && <ModelConfigPage />}
+             {view === "history" && <HistoryPage />}
              {view === "settings" && <SettingsPage />}
              {view === "schedules" && <SchedulesPage />}
            </ErrorBoundary>

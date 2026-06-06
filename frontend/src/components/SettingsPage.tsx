@@ -14,6 +14,8 @@ export function SettingsPage() {
   const [showConflictDetail, setShowConflictDetail] = useState<any | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+
+
   // Report settings
   const [settings, setSettings] = useState<SystemConfig | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -28,6 +30,8 @@ export function SettingsPage() {
     }
   }, []);
   useEffect(() => { void loadSettings(); }, [loadSettings]);
+
+
 
   const toggleFormat = (fmt: string) => {
     setSettings((prev) => {
@@ -104,43 +108,22 @@ export function SettingsPage() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        {/* Export */}
-        <div className="card-item" style={{ padding: 24 }}>
-          <div style={{ textAlign: "center", marginBottom: 16 }}>
-            <Download size={32} style={{ opacity: 0.5, marginBottom: 8 }} />
-            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: 4 }}>导出配置</h3>
-            <p className="text-muted small">将所有模型配置、主题、信息源、标签、调度导出为 JSON 文件</p>
-          </div>
-          <div style={{ display: "flex", justifyContent: "center" }}>
-            <button type="button" className="btn btn-primary" onClick={handleExport} disabled={exporting}>
-              <Download size={14} /> {exporting ? "导出中..." : "下载配置文件"}
-            </button>
-          </div>
-        </div>
-
-        {/* Import */}
-        <div className="card-item" style={{ padding: 24 }}>
-          <div style={{ textAlign: "center", marginBottom: 16 }}>
-            <Upload size={32} style={{ opacity: 0.5, marginBottom: 8 }} />
-            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: 4 }}>导入配置</h3>
-            <p className="text-muted small">从 JSON 备份文件恢复配置</p>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label className="text-muted small" style={{ display: "block", marginBottom: 4 }}>冲突处理方式</label>
-            <select value={importMode} onChange={(e) => setImportMode(e.target.value)} style={{ width: "100%", padding: "8px 10px", background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: "var(--radius)", fontSize: "0.85rem" }}>
-              <option value="skip">跳过已有项目</option>
-              <option value="overwrite">覆盖已有项目</option>
-              <option value="append">追加（创建新条目）</option>
-            </select>
-          </div>
-          <div style={{ display: "flex", justifyContent: "center" }}>
-            <input ref={fileRef} type="file" accept=".json" onChange={handleImport} style={{ display: "none" }} />
-            <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()} disabled={importing}>
-              <Upload size={14} /> {importing ? "导入中..." : "选择文件导入"}
-            </button>
-          </div>
-        </div>
+<div className="toolbar-row" style={{ marginBottom: 16, padding: "10px 14px", background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)" }}>
+        <input ref={fileRef} type="file" accept=".json" onChange={handleImport} style={{ display: "none" }} />
+        <button type="button" className="btn btn-primary" onClick={handleExport} disabled={exporting}>
+          <Download size={14} /> {exporting ? "导出中..." : "导出配置"}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={() => fileRef.current?.click()} disabled={importing}>
+          <Upload size={14} /> {importing ? "导入中..." : "导入配置"}
+        </button>
+        <label className="text-muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          冲突:
+          <select value={importMode} onChange={(e) => setImportMode(e.target.value)} style={{ background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "4px 8px", fontSize: "0.8rem" }}>
+            <option value="skip">跳过</option>
+            <option value="overwrite">覆盖</option>
+            <option value="append">追加</option>
+          </select>
+        </label>
       </div>
 
       {/* Report settings */}

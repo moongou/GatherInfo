@@ -30,20 +30,49 @@ from app.connectors.base import (
 )
 
 
-@register_collector("api_search_baidu")
-class BaiduSearchCollector(BaseCollector):
-    """
-    Baidu Custom Search API.
+@register_collector("api_search")
+class SearchEngineDispatcher(BaseCollector):
+    """Dispatches to the appropriate search engine based on auth_config.type.
 
-    Docs: https://cloud.baidu.com/doc/SEARCH/s/Ak4ch5vkw
-    Requires: BAIDU_API_KEY + BAIDU_CX env vars, or set in auth_config.
+    Supports: tavily (default), baidu, bing, 360.
+    The type is read from auth_config.get("search_type", "tavily").
     """
     channel = "api_search"
-    BASE = "https://api.baidu.com/search/customsearch/v1"
 
     def __init__(self, config: SourceConfig):
         super().__init__(config)
         ac = config.auth_config or {}
+        self._search_type = ac.get("search_type", "tavily")
+        self._delegate = self._build_delegate(ac, config)
+
+    def _build_delegate(self, ac: dict, config: SourceConfig):
+        st = self._search_type
+        if st == "baidu":
+            return BaiduDelegate(config, ac)
+        elif st == "bing":
+            return BingDelegate(config, ac)
+        elif st == "360":
+            return Search360Delegate(config, ac)
+        else:
+            from app.connectors.tavily_search import TavilyCollector
+            return TavilyCollector(config)
+
+    async def validate(self) -> bool:
+        return await self._delegate.validate()
+
+    async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
+        return await self._delegate.fetch(keywords, max_items)
+
+
+class BaiduDelegate(BaseCollector):
+    """
+    Baidu Custom Search API.
+    """
+    channel = "api_search"
+    BASE = "https://api.baidu.com/search/customsearch/v1"
+
+    def __init__(self, config: SourceConfig, ac: dict):
+        super().__init__(config)
         self.api_key = ac.get("api_key", "") or os.getenv("BAIDU_API_KEY", "")
         self.cx = ac.get("cx", "") or os.getenv("BAIDU_CX", "")
         self.region = ac.get("region", "cn")
@@ -183,20 +212,15 @@ class Search360Collector(BaseCollector):
                              status=JobStatus.FAILED, items=[], error_log=[msg])
 
 
-@register_collector("api_search_bing")
-class BingSearchCollector(BaseCollector):
+class BingDelegate(BaseCollector):
     """
     Microsoft Bing Web Search API.
-
-    Requires: BING_API_KEY env var.
-    Docs: https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/
     """
     channel = "api_search"
     BASE = "https://api.bing.microsoft.com/v7.0/search"
 
-    def __init__(self, config: SourceConfig):
+    def __init__(self, config: SourceConfig, ac: dict):
         super().__init__(config)
-        ac = config.auth_config or {}
         self.api_key = ac.get("api_key", "") or os.getenv("BING_API_KEY", "")
         self.market = ac.get("market", "zh-CN")
 
@@ -254,7 +278,6 @@ class BingSearchCollector(BaseCollector):
                              status=JobStatus.FAILED, items=[], error_log=[msg])
 
 
-@register_collector("targeted_scrape")
 class TargetedScrapeCollector(BaseCollector):
     """
     Targeted URL scraping — collect from specific URLs defined in the topic.

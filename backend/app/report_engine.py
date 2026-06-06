@@ -176,6 +176,7 @@ def _build_item_context(items: list[CollectedItem]) -> list[dict]:
             "title": it.title,
             "summary": it.summary or "",
             "content": (it.content or "")[:2000],  # Truncate to fit context
+            "url": it.url or "",
             "source": it.source_id,
             "language": it.language or "unknown",
             "category": it.category or "unknown",
@@ -252,6 +253,7 @@ def _build_report_prompt(
 - 每个部分以 "## " 标题开头
 - 关键数据点和引用标注对应条目编号，如 [参见条目1]
 - 语言：中文
+- 引用条目时标注编号，编号可点击查看原文，如 [参见条目1](条目原文链接)
 
 请回复两份内容，以 ===SEPARATOR=== 分隔：
 第一部分：报告全文

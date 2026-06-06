@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Search, ExternalLink, Filter, X, BookOpen, BookOpenText } from "lucide-react";
-import { fetchItems, fetchTags, fetchSources, fetchTopics } from "../api";
+import { fetchItems, fetchTags, fetchSources, fetchTopics, fetchStatsBySource, fetchRuns, fetchBatches, fetchItemIds, batchDeleteItems } from "../api";
 import type { CollectedItem, ItemList, Tag, Source, Topic } from "../types";
 
 const PAGE_SIZE = 40;
@@ -19,12 +19,30 @@ export function ItemsPage() {
 
   const [tags, setTags] = useState<Tag[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
+  const [sourceCounts, setSourceCounts] = useState<Record<string, number>>({});
+  const [batchOptions, setBatchOptions] = useState<{run_id: string; label: string}[]>([]);
+  const [filterRun, setFilterRun] = useState("");
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [topics, setTopics] = useState<Topic[]>([]);
 
   useEffect(() => {
     fetchTags(undefined, 200).then(setTags).catch(() => {});
     fetchSources().then(setSources).catch(() => {});
     fetchTopics().then(setTopics).catch(() => {});
+    fetchStatsBySource().then((rows) => {
+      const m: Record<string, number> = {};
+      for (const r of rows) m[r.source_id] = r.count;
+      setSourceCounts(m);
+    }).catch(() => {});
+    fetchBatches(filterTopic || undefined, 30).then((batches) => {
+      const options: {run_id: string; label: string}[] = [];
+      for (const b of batches) {
+        for (const r of b.runs || []) {
+          if (r.id) options.push({run_id: r.id, label: b.batch_label || `${b.topic_name || "采集"}_${b.started_at?.slice(0,16) || ""}`});
+        }
+      }
+      setBatchOptions(options);
+    }).catch(() => {});
   }, []);
 
   const load = useCallback(async () => {
@@ -36,6 +54,7 @@ export function ItemsPage() {
         ...(filterTag ? { tag: filterTag } : {}),
         ...(filterSource ? { source_id: filterSource } : {}),
         ...(filterTopic ? { topic_id: filterTopic } : {}),
+    ...(filterRun ? { run_id: filterRun } : {}),
         ...(filterCat ? { category: filterCat } : {}),
       });
       setData(result);
@@ -110,7 +129,12 @@ export function ItemsPage() {
 
         <select value={filterSource} onChange={(e) => { setFilterSource(e.target.value); setPage(1); }}>
           <option value="">全部信息源</option>
-          {sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {sources.map((s) => <option key={s.id} value={s.id}>{s.name} ({sourceCounts[s.id] || 0})</option>)}
+        </select>
+
+        <select value={filterRun} onChange={(e) => { setFilterRun(e.target.value); setPage(1); }}>
+          <option value="">全部批次</option>
+          {batchOptions.map((b) => <option key={b.run_id} value={b.run_id}>{b.label}</option>)}
         </select>
 
         <select value={filterTag} onChange={(e) => { setFilterTag(e.target.value); setPage(1); }}>
@@ -126,13 +150,73 @@ export function ItemsPage() {
       </div>
 
       {/* Item list */}
+      {selectedItems.size > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "8px 14px", background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: "0.82rem" }}>
+            <input type="checkbox" style={{ accentColor: "var(--accent)", cursor: "pointer" }}
+              checked={selectedItems.size >= (data?.total || 0)}
+              onChange={async (e) => {
+                if (e.target.checked) {
+                  // Select all matching items across ALL pages
+                  const result = await fetchItemIds({
+                    q: query || undefined,
+                    topic_id: filterTopic || undefined,
+                    source_id: filterSource || undefined,
+                    tag: filterTag || undefined,
+                    category: filterCat || undefined,
+                    run_id: filterRun || undefined,
+                  });
+                  setSelectedItems(new Set(result.ids));
+                } else {
+                  setSelectedItems(new Set());
+                }
+              }}
+            />
+            <strong>全选</strong>
+          </label>
+          <span className="text-muted small">已选 {selectedItems.size} / {data?.total || 0} 条</span>
+          <button type="button" className="btn btn-sm btn-danger" onClick={async () => {
+            const ids = Array.from(selectedItems);
+            if (!confirm(`确定删除选中的 ${ids.length} 条信息？操作不可撤销。`)) return;
+            try {
+              const r = await batchDeleteItems(ids);
+              setSelectedItems(new Set());
+              setFilterRun(""); setFilterSource(""); setFilterTopic(""); setFilterTag(""); setFilterCat("");
+              setQuery(""); setPage(1);
+              await load();
+              alert(`已删除 ${r.deleted} 条`);
+            } catch (e) {
+              alert(e instanceof Error ? e.message : "删除失败");
+            }
+          }}>
+            删除选中
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSelectedItems(new Set())}>
+            取消选择
+          </button>
+        </div>
+      )}
+
       {loading ? <div className="loading">加载条目...</div> :
        error ? <div className="error-banner">{error}</div> :
        !data ? null : (
         <>
           <div className="item-list">
             {data.items.map((item) => (
+              <div className="item-list-row" style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <input type="checkbox" style={{ marginTop: 14, accentColor: "var(--accent)", cursor: "pointer" }}
+              checked={selectedItems.has(item.id)}
+              onChange={() => {
+                setSelectedItems((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                  return next;
+                });
+              }} />
+            <div style={{ flex: 1 }}>
               <ItemCard key={item.id} item={item} />
+            </div>
+          </div>
             ))}
           </div>
 

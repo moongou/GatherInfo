@@ -127,7 +127,7 @@ export function ModelConfigPage() {
       )}
 
       <div className="card-list">
-        {models.map((m) => {
+        {[...models].sort((a,b)=>{if(a.is_default)return -1;if(b.is_default)return 1;return 0;}).map((m) => {
           const test = testResults[m.id];
           return (
             <article key={m.id} className="card-item">
@@ -197,6 +197,14 @@ export function ModelConfigPage() {
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleListModels(m.id)} disabled={listing === m.id}>
                   <List size={12} /> {listing === m.id ? "查询中..." : "查询模型"}
                 </button>
+                {!m.is_default && (
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={async () => {
+                    try { await updateModel(m.id, { is_default: true }); await load(); }
+                    catch(e) { alert(e instanceof Error ? e.message : "失败"); }
+                  }}>
+                    <Edit3 size={12} /> 设为默认
+                  </button>
+                )}
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(m)}>
                   <Edit3 size={12} /> 编辑
                 </button>

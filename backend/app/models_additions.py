@@ -36,12 +36,18 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE topics ADD COLUMN last_error TEXT"))
             if "collect_window_days" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN collect_window_days INTEGER DEFAULT 7"))
+            if "schedule_cron" not in cols:
+                conn.execute(text("ALTER TABLE topics ADD COLUMN schedule_cron VARCHAR(100)"))
+            if "next_run_at" not in cols:
+                conn.execute(text("ALTER TABLE topics ADD COLUMN next_run_at TIMESTAMP"))
             conn.commit()
 
     # Add window columns to `collection_runs` table if it exists
     if "collection_runs" in existing_tables:
         cols = {c["name"] for c in inspector.get_columns("collection_runs")}
         with engine.connect() as conn:
+            if "batch_id" not in cols:
+                conn.execute(text("ALTER TABLE collection_runs ADD COLUMN batch_id VARCHAR(80)"))
             if "window_start" not in cols:
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN window_start TIMESTAMP"))
             if "window_end" not in cols:

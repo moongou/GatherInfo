@@ -1,10 +1,37 @@
-import { useEffect, useState, useCallback } from "react";
-import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, ChevronDown } from "lucide-react";
 import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources } from "../api";
 import type { Topic, CollectResult, ModelConfig, Source } from "../types";
 import { DESCRIPTION_PROMPT_TEMPLATES, KEYWORD_WEIGHT_TEMPLATES } from "../templates";
+import type { PromptTemplate, KeywordTemplate } from "../templates";
 
 /** Humanize a 5-field cron expression into a Chinese description (best-effort). */
+function recommendTemplates(keywords: string[]): { label: string; value: string; score: number }[] {
+  if (!keywords.length) return [];
+  const allTemplates = [...DESCRIPTION_PROMPT_TEMPLATES, ...KEYWORD_WEIGHT_TEMPLATES];
+  return allTemplates
+    .map((t) => {
+      const label = t.label.toLowerCase();
+      const value = t.value.toLowerCase();
+      let score = 0;
+      for (const kw of keywords) {
+        const k = kw.toLowerCase();
+        if (label.includes(k)) score += 3;
+        if (value.includes(k)) score += 2;
+      }
+      const valueWords = value.split(/[\\s,\u3001]+/);
+      for (const w of valueWords) {
+        for (const kw of keywords) {
+          if (w.includes(kw.toLowerCase()) || kw.toLowerCase().includes(w)) score += 1;
+        }
+      }
+      return { ...t, score };
+    })
+    .filter((t) => t.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
 function humanizeCron(cron: string | null): string {
   if (!cron) return "未设置";
   const parts = cron.trim().split(/\s+/);
@@ -322,21 +349,12 @@ function TopicForm({ topic, sources, models, onSave, onClose }: TopicFormProps) 
           <label className="span-2">关键词 (逗号分隔) <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="贸易政策, 关税, RCEP" /></label>
 
           <label className="span-2">绑定信息源 (不选=所有活跃信息源)
-            <div className="checkbox-grid">
-              {activeSources.length === 0 && <span className="text-muted small">暂无活跃信息源</span>}
-              {activeSources.length > 0 && (
-                <label className="checkbox-item checkbox-item--all">
-                  <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
-                  {" "}<strong>{allSelected ? "取消全选" : "全选"}</strong>
-                </label>
-              )}
-              {activeSources.map((s) => (
-                <label key={s.id} className="checkbox-item">
-                  <input type="checkbox" checked={selectedSourceIds.includes(s.id)} onChange={() => toggleSource(s.id)} />
-                  {" "}{s.name}
-                </label>
-              ))}
-            </div>
+            <MultiSelect
+              options={activeSources.map((s) => ({ value: s.id, label: s.name }))}
+              selected={selectedSourceIds}
+              onChange={setSelectedSourceIds}
+              placeholder={selectedSourceIds.length === 0 ? "全部活跃信息源" : `已选 ${selectedSourceIds.length} 个`}
+            />
           </label>
 
           <label>Cron表达式 <input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 8 * * * (每日8点)" /></label>
@@ -363,16 +381,23 @@ function TopicForm({ topic, sources, models, onSave, onClose }: TopicFormProps) 
             )}
           </label>
 
-          <label className="span-2">加权关键词 (每行一个, keyword:权重)
+                    <label className="span-2">加权关键词 (每行一个, keyword:权重)
             <div className="template-row">
               <select className="template-select" value="" onChange={(e) => {
                 const tpl = KEYWORD_WEIGHT_TEMPLATES.find((t) => t.label === e.target.value);
                 if (tpl) setKeywordTags((prev: string) => (prev.trim() ? prev.trimEnd() + "\n" + tpl.value : tpl.value));
               }}>
                 <option value="">插入模板...</option>
-                {KEYWORD_WEIGHT_TEMPLATES.map((t) => (
-                  <option key={t.label} value={t.label}>{t.label}</option>
-                ))}
+                {KEYWORD_WEIGHT_TEMPLATES.map((t) => {
+                      const kwList = keywords.split(/[,\u3001\s]+/).filter(Boolean);
+                      const recs = recommendTemplates(kwList);
+                      const recLabels = new Set(recs.map((r) => r.label));
+                      return (
+                        <option key={t.label} value={t.label}>
+                          {recLabels.has(t.label) ? "\u2605 " + t.label : t.label}
+                        </option>
+                      );
+                    })}
               </select>
             </div>
             <textarea rows={3} value={keywordTags} onChange={(e) => setKeywordTags(e.target.value)}
@@ -387,17 +412,23 @@ function TopicForm({ topic, sources, models, onSave, onClose }: TopicFormProps) 
                 if (tpl) setDescriptionPrompt(tpl.value);
               }}>
                 <option value="">选择模板...</option>
-                {DESCRIPTION_PROMPT_TEMPLATES.map((t) => (
-                  <option key={t.label} value={t.label}>{t.label}</option>
-                ))}
+                {DESCRIPTION_PROMPT_TEMPLATES.map((t) => {
+                      const kwList = keywords.split(/[,\u3001\s]+/).filter(Boolean);
+                      const recs = recommendTemplates(kwList);
+                      const recLabels = new Set(recs.map((r) => r.label));
+                      return (
+                        <option key={t.label} value={t.label}>
+                          {recLabels.has(t.label) ? "\u2605 " + t.label : t.label}
+                        </option>
+                      );
+                    })}
               </select>
             </div>
             <textarea rows={3} value={descriptionPrompt} onChange={(e) => setDescriptionPrompt(e.target.value)}
               placeholder="例如：监控全球主要经济体的贸易政策变化、关税调整、贸易协定进展，重点关注影响中国出口的措施" />
             <span className="text-muted small">用自然语言描述这个主题的关注重点和需求，AI 报告生成时会参考此描述</span>
           </label>
-
-          <label className="span-2">目标URL (每行一个) <textarea rows={2} value={targetUrls} onChange={(e) => setTargetUrls(e.target.value)} placeholder="https://example.com/page&#10;https://example.com/other" /></label>
+<label className="span-2">目标URL (每行一个) <textarea rows={2} value={targetUrls} onChange={(e) => setTargetUrls(e.target.value)} placeholder="https://example.com/page&#10;https://example.com/other" /></label>
           <label className="span-2">自动标签 (keyword:tag, 逗号分隔) <input value={autoTags} onChange={(e) => setAutoTags(e.target.value)} placeholder="关税:event:tariff, 电池:product:battery" /></label>
         </div>
         <div className="modal-actions">
@@ -407,6 +438,62 @@ function TopicForm({ topic, sources, models, onSave, onClose }: TopicFormProps) 
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Multi-select dropdown component ─────────────────────────────────────────
+
+function MultiSelect({ options, selected, onChange, placeholder }: {
+  options: { value: string; label: string }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const allSelected = options.length > 0 && options.every((o) => selected.includes(o.value));
+  const toggleAll = () => {
+    onChange(allSelected ? [] : options.map((o) => o.value));
+  };
+  const toggle = (value: string) => {
+    onChange(selected.includes(value) ? selected.filter((s) => s !== value) : [...selected, value]);
+  };
+
+  return (
+    <div className="multi-select-wrapper" ref={ref}>
+      <button type="button" className="multi-select-trigger" onClick={() => setOpen(!open)}>
+        <span className={selected.length === 0 ? "placeholder" : ""}>{placeholder}</span>
+        <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "", transition: "transform 0.15s" }} />
+      </button>
+      {open && (
+        <div className="multi-select-dropdown">
+          {options.length > 0 && (
+            <label className="multi-select-option multi-select-all">
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+              <strong>{allSelected ? "取消全选" : "全选"}</strong>
+            </label>
+          )}
+          {options.map((o) => (
+            <label key={o.value} className="multi-select-option">
+              <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
+              {o.label}
+            </label>
+          ))}
+          {options.length === 0 && <div className="multi-select-option" style={{ color: "var(--ink-muted)", cursor: "default" }}>暂无活跃信息源</div>}
+        </div>
+      )}
     </div>
   );
 }
