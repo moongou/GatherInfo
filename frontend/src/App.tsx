@@ -1,0 +1,86 @@
+import { useMemo, useState } from "react";
+import {
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings,
+} from "lucide-react";
+
+import { DashboardPage } from "./components/DashboardPage";
+import { TopicsPage } from "./components/TopicsPage";
+import { SourcesPage } from "./components/SourcesPage";
+import { ItemsPage } from "./components/ItemsPage";
+import { TagsPage } from "./components/TagsPage";
+import { SchedulesPage } from "./components/SchedulesPage";
+import { ModelConfigPage } from "./components/ModelConfigPage";
+import { SettingsPage } from "./components/SettingsPage";
+import { ReportsPage } from "./components/ReportsPage";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+
+type ViewId = "dashboard" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "settings";
+
+interface ViewDef {
+  id: ViewId;
+  label: string;
+  icon: typeof LayoutDashboard;
+}
+
+const views: ViewDef[] = [
+  { id: "dashboard", label: "仪表盘", icon: LayoutDashboard },
+  { id: "topics", label: "主题管理", icon: BarChart3 },
+  { id: "sources", label: "信息源", icon: Globe },
+  { id: "items", label: "采集条目", icon: Database },
+  { id: "tags", label: "标签系统", icon: Tags },
+  { id: "reports", label: "智能报告", icon: FileText },
+  { id: "models", label: "模型配置", icon: Cpu },
+  { id: "schedules", label: "周期调度", icon: Clock },
+  { id: "settings", label: "系统配置", icon: Settings },
+];
+
+export function App() {
+  const [view, setView] = useState<ViewId>("dashboard");
+
+  const activeDef = useMemo(() => views.find((v) => v.id === view) ?? views[0], [view]);
+
+  return (
+    <div className="app-shell">
+      <aside className="side-rail">
+        <div className="brand">G<i>I</i></div>
+        <nav>
+          {views.map((v) => {
+            const Icon = v.icon;
+            const isActive = view === v.id;
+            return (
+              <button
+                key={v.id}
+                type="button"
+                className={`nav-btn${isActive ? " nav-btn--active" : ""}`}
+                onClick={() => setView(v.id)}
+                title={v.label}
+              >
+                <Icon size={18} />
+                <span>{v.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+      <main className="workspace">
+        <header className="workspace-header">
+          <h1>GatherInfo</h1>
+          <span className="subtitle">全球信息采集监控平台</span>
+        </header>
+        <section className="view-frame">
+           <ErrorBoundary key={view}>
+             {view === "dashboard" && <DashboardPage />}
+             {view === "topics" && <TopicsPage />}
+             {view === "sources" && <SourcesPage />}
+             {view === "items" && <ItemsPage />}
+             {view === "tags" && <TagsPage />}
+             {view === "reports" && <ReportsPage />}
+             {view === "models" && <ModelConfigPage />}
+             {view === "settings" && <SettingsPage />}
+             {view === "schedules" && <SchedulesPage />}
+           </ErrorBoundary>
+        </section>
+      </main>
+    </div>
+  );
+}

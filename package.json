@@ -1,0 +1,12 @@
+{
+  "name": "global-trade-risk-intelligence-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "build": "npm --prefix frontend run build",
+    "typecheck": "npm --prefix frontend run typecheck",
+    "test:backend": "backend/.venv/bin/python -m pytest backend/tests"
+  }
+}

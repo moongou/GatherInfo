@@ -1,0 +1,219 @@
+"""
+Generic JSON-API connector for GatherInfo.
+
+A single configurable connector that can talk to most JSON HTTP APIs
+(NewsAPI, UN Comtrade, World Bank, Trading Economics, etc.) so the user
+only configures things in ONE place (this project), per source.
+
+All behaviour is driven by SourceConfig fields:
+  - base_url / api_endpoint : request URL (endpoint joined onto base_url)
+  - api_key                 : credential (placed per `auth_config.auth`)
+  - auth_config             : a small mapping describing how to call + parse
+
+auth_config schema (all keys optional, sensible defaults):
+  {
+    "method": "GET" | "POST",            # default GET
+    "auth": "query" | "header" | "bearer" | "none",   # where to put api_key
+    "auth_param": "apiKey",              # query/header name for the key
+    "query": {"language": "en"},         # extra static query params
+    "keyword_param": "q",                # query param that receives keywords
+    "keyword_join": " OR ",              # how to join multiple keywords
+    "body": {...},                       # static JSON body for POST
+    "items_path": "articles",            # dot-path to the list of records
+                                         # (supports nested: "data.results")
+    "fields": {                          # record field -> source key (dot-path)
+      "title": "title",
+      "content": "content",
+      "summary": "description",
+      "url": "url",
+      "published_at": "publishedAt",
+      "language": "language",
+      "category": "category"
+    }
+  }
+
+This keeps every commercial/official JSON API configurable from the single
+source-config UI rather than requiring per-platform code.
+"""
+import asyncio
+from urllib.parse import urljoin
+
+import httpx
+
+from app.connectors.base import (
+    BaseCollector, CollectResult, FetchItem,
+    JobStatus, SourceConfig, register_collector,
+)
+
+
+@register_collector("json_api")
+class JsonApiCollector(BaseCollector):
+    channel = "json_api"
+
+    async def validate(self) -> bool:
+        ac = self.config.auth_config or {}
+        if ac.get("auth", "none") != "none" and not self.config.api_key:
+            return False
+        url = self._request_url()
+        if not url:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                params, headers, _ = self._build_request(["test"])
+                resp = await client.get(url, params=params, headers=headers)
+                return resp.status_code < 500
+        except Exception:
+            return False
+
+    async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
+        url = self._request_url()
+        if not url:
+            return self._error("base_url / api_endpoint not configured")
+
+        ac = self.config.auth_config or {}
+        if ac.get("auth", "none") != "none" and not self.config.api_key:
+            return self._error("api_key not configured for this source")
+
+        method = (ac.get("method") or "GET").upper()
+        queries = keywords or self.config.default_keywords or [""]
+        params, headers, body = self._build_request(queries)
+
+        items: list[FetchItem] = []
+        errors: list[str] = []
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.config.timeout_seconds,
+                follow_redirects=True,
+            ) as client:
+                if method == "POST":
+                    resp = await client.post(url, params=params, headers=headers, json=body)
+                else:
+                    resp = await client.get(url, params=params, headers=headers)
+                if resp.status_code == 429:
+                    return self._error("Rate limited (HTTP 429)")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            return self._error(f"HTTP/JSON error: {exc}")
+
+        records = _dig(data, ac.get("items_path", ""))
+        if records is None:
+            # Fall back: if the payload itself is a list, use it
+            records = data if isinstance(data, list) else []
+        if not isinstance(records, list):
+            return self._error(f"items_path did not resolve to a list: {ac.get('items_path')}")
+
+        fields = ac.get("fields") or {
+            "title": "title", "content": "content", "summary": "description",
+            "url": "url", "published_at": "publishedAt",
+            "language": "language", "category": "category",
+        }
+        for rec in records[:max_items]:
+            if not isinstance(rec, dict):
+                continue
+            title = _coerce_str(_dig(rec, fields.get("title", "title")))
+            if not title:
+                continue
+            content = _coerce_str(_dig(rec, fields.get("content", "content")))
+            summary = _coerce_str(_dig(rec, fields.get("summary", "summary")))
+            items.append(FetchItem(
+                title=title,
+                content=content or summary or None,
+                url=_coerce_str(_dig(rec, fields.get("url", "url"))) or None,
+                summary=(summary or content or "")[:500] or None,
+                published_at=_coerce_str(_dig(rec, fields.get("published_at", "publishedAt"))) or None,
+                language=_coerce_str(_dig(rec, fields.get("language", "language"))) or None,
+                category=_coerce_str(_dig(rec, fields.get("category", "category"))) or None,
+                raw_metadata={"connector": "json_api", "source": self.config.id},
+            ))
+
+        return CollectResult(
+            run_id=self._new_run_id(), source_id=self.config.id,
+            status=JobStatus.COMPLETED, items=items, items_new=len(items),
+        )
+
+    # ── internals ────────────────────────────────────────────────────────────
+
+    def _request_url(self) -> str:
+        base = (self.config.base_url or "").strip()
+        endpoint = (self.config.api_endpoint or "").strip()
+        if endpoint.startswith("http"):
+            return endpoint
+        if base and endpoint:
+            return urljoin(base if base.endswith("/") else base + "/", endpoint.lstrip("/"))
+        return base or endpoint
+
+    def _build_request(self, queries: list[str]) -> tuple[dict, dict, dict]:
+        ac = self.config.auth_config or {}
+        params: dict = dict(ac.get("query") or {})
+        headers: dict = {"Accept": "application/json",
+                         "User-Agent": "GatherInfo/0.4 (Customs Intel Monitor)"}
+        body: dict = dict(ac.get("body") or {})
+
+        # Keyword injection
+        kw = [q for q in queries if q]
+        if kw:
+            joined = (ac.get("keyword_join") or " OR ").join(kw)
+            kp = ac.get("keyword_param")
+            if kp:
+                if (ac.get("method") or "GET").upper() == "POST" and ac.get("keyword_in") == "body":
+                    body[kp] = joined
+                else:
+                    params[kp] = joined
+
+        # Auth placement
+        auth = ac.get("auth", "none")
+        key = self.config.api_key or ""
+        if auth == "query" and key:
+            params[ac.get("auth_param", "apiKey")] = key
+        elif auth == "header" and key:
+            headers[ac.get("auth_param", "X-Api-Key")] = key
+        elif auth == "bearer" and key:
+            headers["Authorization"] = f"Bearer {key}"
+
+        return params, headers, body
+
+    def _error(self, msg: str) -> CollectResult:
+        return CollectResult(
+            run_id=self._new_run_id(), source_id=self.config.id,
+            status=JobStatus.FAILED, items=[], error_log=[msg],
+        )
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _dig(obj, path: str):
+    """Resolve a dot-path (e.g. 'data.results') against nested dicts/lists."""
+    if path is None or path == "":
+        return obj
+    cur = obj
+    for part in str(path).split("."):
+        if isinstance(cur, dict):
+            cur = cur.get(part)
+        elif isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+        if cur is None:
+            return None
+    return cur
+
+
+def _coerce_str(val) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val.strip()
+    if isinstance(val, (int, float, bool)):
+        return str(val)
+    if isinstance(val, dict):
+        # common nested shapes: {"name": ...} or {"value": ...}
+        for k in ("name", "value", "text", "title"):
+            if k in val:
+                return _coerce_str(val[k])
+    if isinstance(val, list):
+        return ", ".join(_coerce_str(v) for v in val if v is not None)
+    return str(val)

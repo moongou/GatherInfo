@@ -1,0 +1,235 @@
+// GatherInfo — API client
+import type {
+  Source, Topic, Schedule, Tag, TagStats, Stats,
+  DashboardData, CollectedItem, ItemList,
+  CollectResult, ConnectorInfo, CollectRun,
+} from "./types";
+
+const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+
+async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
+  const url = new URL(`${BASE}${path}`, window.location.origin);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
+    }
+  }
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? resp.statusText);
+  }
+  return resp.json();
+}
+
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const resp = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? resp.statusText);
+  }
+  return resp.json();
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? resp.statusText);
+  }
+  return resp.json();
+}
+
+async function del(path: string): Promise<void> {
+  const resp = await fetch(`${BASE}${path}`, { method: "DELETE" });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? resp.statusText);
+  }
+}
+
+// ── Sources ─────────────────────────────────────────────────────────────
+
+export const fetchSources = () => get<Source[]>("/sources");
+export const fetchSource = (id: string) => get<Source>(`/sources/${id}`);
+export const createSource = (data: Partial<Source> & { name: string; channel: string }) =>
+  post<Source>("/sources", data);
+export const updateSource = (id: string, data: Partial<Source>) =>
+  put<Source>(`/sources/${id}`, data);
+export const deleteSource = (id: string) => del(`/sources/${id}`);
+export const validateSource = (id: string) =>
+  post<{ source_id: string; valid: boolean; error: string | null }>(`/sources/${id}/validate`);
+
+// ── Topics ──────────────────────────────────────────────────────────────
+
+export const fetchTopics = () => get<Topic[]>("/topics");
+export const fetchTopic = (id: string) => get<Topic>(`/topics/${id}`);
+export const createTopic = (data: Partial<Topic> & { name: string }) =>
+  post<Topic>("/topics", data);
+export const updateTopic = (id: string, data: Partial<Topic>) =>
+  put<Topic>(`/topics/${id}`, data);
+export const deleteTopic = (id: string) => del(`/topics/${id}`);
+
+// ── Schedules ───────────────────────────────────────────────────────────
+
+export const fetchSchedules = () => get<Schedule[]>("/schedules");
+export const createSchedule = (data: Partial<Schedule> & { id: string; name: string; cron_expression: string }) =>
+  post<Schedule>("/schedules", data);
+export const deleteSchedule = (id: string) => del(`/schedules/${id}`);
+export const runScheduleNow = (id: string) =>
+  post<CollectResult[]>(`/schedules/${id}/run-now`);
+
+// ── Collection ──────────────────────────────────────────────────────────
+
+export const collectTopic = (topicId: string) =>
+  post<CollectResult[]>("/collect", { topic_id: topicId });
+export const collectSource = (sourceId: string, keywords?: string[]) =>
+  post<CollectResult[]>("/collect", { source_id: sourceId, keywords });
+export const fetchRuns = (topicId?: string, limit = 20) =>
+  get<CollectRun[]>("/runs", {
+    ...(topicId ? { topic_id: topicId } : {}),
+    limit: String(limit),
+  });
+
+// ── Items ───────────────────────────────────────────────────────────────
+
+export interface ItemFilters {
+  topic_id?: string;
+  source_id?: string;
+  category?: string;
+  tag?: string;
+  status?: string;
+  language?: string;
+  q?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export const fetchItems = (filters: ItemFilters = {}) =>
+  get<ItemList>("/items", {
+    ...(filters.topic_id ? { topic_id: filters.topic_id } : {}),
+    ...(filters.source_id ? { source_id: filters.source_id } : {}),
+    ...(filters.category ? { category: filters.category } : {}),
+    ...(filters.tag ? { tag: filters.tag } : {}),
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.language ? { language: filters.language } : {}),
+    ...(filters.q ? { q: filters.q } : {}),
+    page: String(filters.page ?? 1),
+    page_size: String(filters.page_size ?? 50),
+  } as Record<string, string>);
+export const fetchItem = (id: string) => get<CollectedItem>(`/items/${id}`);
+
+// ── Tags ────────────────────────────────────────────────────────────────
+
+export const fetchTags = (namespace?: string, limit = 100) =>
+  get<Tag[]>("/tags", { ...(namespace ? { namespace } : {}), limit: String(limit) });
+export const fetchTagStats = () => get<TagStats[]>("/tags/stats");
+
+// ── Stats ───────────────────────────────────────────────────────────────
+
+export const fetchStats = () => get<Stats>("/stats");
+export const fetchDashboard = () => get<DashboardData>("/stats/dashboard");
+export const fetchDailyTrend = (days = 30) => get<{ date: string; count: number }[]>("/stats/items-per-day", { days: String(days) });
+export const fetchStatsByCategory = () => get<{ category: string; count: number }[]>("/stats/by-category");
+export const fetchStatsByLanguage = () => get<{ language: string; count: number }[]>("/stats/by-language");
+export const fetchStatsBySource = () => get<{ source_id: string; count: number }[]>("/stats/by-source");
+
+// ── Seed ────────────────────────────────────────────────────────────────
+
+export const seedDefaults = () => post<{ sources_created: number; topics_created: number }>("/seed-defaults");
+
+// ── Connectors ──────────────────────────────────────────────────────────
+
+export const fetchConnectors = () => get<ConnectorInfo[]>("/connectors");
+
+// ── Model Config ───────────────────────────────────────────────────
+
+export const fetchModels = () => get<import("./types").ModelConfig[]>("/models");
+export const fetchModel = (id: string) => get<import("./types").ModelConfig>(`/models/${id}`);
+export const createModel = (data: import("./types").ModelConfig & { id: string; name: string; provider: string; model_name: string }) =>
+  post<import("./types").ModelConfig>("/models", data);
+export const updateModel = (id: string, data: Partial<import("./types").ModelConfig>) =>
+  put<import("./types").ModelConfig>(`/models/${id}`, data);
+export const deleteModel = (id: string) => del(`/models/${id}`);
+export const testModel = (id: string) =>
+  post<import("./types").ModelTestResult>(`/models/${id}/test`);
+
+// ── Reports ────────────────────────────────────────────────────────
+
+export const fetchReports = (topicId?: string) =>
+  get<import("./types").ReportList>("/reports", topicId ? { topic_id: topicId } : {});
+export const fetchReport = (id: string) => get<import("./types").Report>(`/reports/${id}`);
+export const generateReport = (
+  topicId: string,
+  opts: { modelId?: string; title?: string; collectionRunId?: string; dateFrom?: string; dateTo?: string } = {},
+) =>
+  post<import("./types").Report>("/reports/generate", {
+    topic_id: topicId,
+    ...(opts.modelId ? { model_id: opts.modelId } : {}),
+    ...(opts.title ? { title: opts.title } : {}),
+    ...(opts.collectionRunId ? { collection_run_id: opts.collectionRunId } : {}),
+    ...(opts.dateFrom ? { date_from: opts.dateFrom } : {}),
+    ...(opts.dateTo ? { date_to: opts.dateTo } : {}),
+  });
+export const batchGenerateReports = (
+  topicIds: string[],
+  modelId?: string,
+  collectionRunIds?: (string | null)[],
+) =>
+  post<import("./types").BatchGenerateResult>("/reports/batch-generate", {
+    topic_ids: topicIds,
+    ...(modelId ? { model_id: modelId } : {}),
+    ...(collectionRunIds ? { collection_run_ids: collectionRunIds } : {}),
+  });
+export const deleteReport = (id: string) => del(`/reports/${id}`);
+export const exportReport = (id: string) =>
+  post<import("./types").Report>(`/reports/${id}/export`, {});
+export const downloadReportUrl = (id: string, format: string) =>
+  `${BASE}/reports/${id}/download?format=${encodeURIComponent(format)}`;
+
+// ── System settings ────────────────────────────────────────────────
+
+export const fetchSettings = () => get<import("./types").SystemConfig>("/settings");
+export const updateSettings = (data: Partial<import("./types").SystemConfig>) =>
+  put<import("./types").SystemConfig>("/settings", data);
+
+// ── Search Tools ───────────────────────────────────────────────────
+
+export const fetchSearchTools = () => get<import("./types").SearchToolConfig[]>("/search-tools");
+export const createSearchTool = (data: Partial<import("./types").SearchToolConfig> & { id: string; name: string; tool_type: string }) =>
+  post<import("./types").SearchToolConfig>("/search-tools", data);
+export const updateSearchTool = (id: string, data: Partial<import("./types").SearchToolConfig>) =>
+  put<import("./types").SearchToolConfig>(`/search-tools/${id}`, data);
+export const deleteSearchTool = (id: string) => del(`/search-tools/${id}`);
+
+// ── Tag Management ────────────────────────────────────────────────────
+
+export const updateTag = (id: string, data: Partial<import("./types").Tag>) =>
+  put<import("./types").Tag>(`/tags/${id}`, data);
+export const deleteTag = (id: string) => del(`/tags/${id}`);
+export const mergeTags = (sourceTagId: string, targetTagId: string) =>
+  post<import("./types").TagMergeResult>("/tags/merge", {
+    source_tag_id: sourceTagId,
+    target_tag_id: targetTagId,
+  });
+
+// ── Model available models listing ────────────────────────────────────
+
+export const listAvailableModels = (id: string) =>
+  post<import("./types").ListModelsResult>(`/models/${id}/list-models`);
+
+export const autoDiscoverModels = () =>
+  post<import("./types").AutoDiscoverResult>("/models/auto-discover");
+
+// ── Configuration Export / Import ────────────────────────────────────
+
+export const exportConfig = () => get<any>("/config/export");
+export const importConfig = (data: any) => post<{imported: Record<string, number>; conflicts: any[]; conflict_count: number}>("/config/import", data);
