@@ -658,25 +658,6 @@ def list_items(
     )
 
 
-@router.get("/items/{item_id}", response_model=ItemOut)
-def get_item(item_id: str, db: Session = Depends(get_db)):
-    it = db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
-    if not it: raise HTTPException(404)
-    return ItemOut(
-        id=it.id, source_id=it.source_id, title=it.title,
-        content=it.content, summary=it.summary, url=it.url,
-        language=it.language, category=it.category, tags=_item_tags(it),
-        entities=it.entities, quality_score=it.quality_score or 0,
-        relevance_score=it.relevance_score or 0,
-        status=it.status.value if it.status else "raw",
-        collected_at=it.collected_at, published_at=it.published_at,
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Tags
-# ═══════════════════════════════════════════════════════════════════════════════
-
 @router.get("/items/ids")
 def list_item_ids(
     topic_id: str | None = None,
@@ -707,6 +688,25 @@ def list_item_ids(
     total = query.count()
     ids = [row[0] for row in query.all()]
     return {"ids": ids, "total": total, "matching": len(ids)}
+
+@router.get("/items/{item_id}", response_model=ItemOut)
+def get_item(item_id: str, db: Session = Depends(get_db)):
+    it = db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
+    if not it: raise HTTPException(404)
+    return ItemOut(
+        id=it.id, source_id=it.source_id, title=it.title,
+        content=it.content, summary=it.summary, url=it.url,
+        language=it.language, category=it.category, tags=_item_tags(it),
+        entities=it.entities, quality_score=it.quality_score or 0,
+        relevance_score=it.relevance_score or 0,
+        status=it.status.value if it.status else "raw",
+        collected_at=it.collected_at, published_at=it.published_at,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tags
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/items/batch-delete")
 def batch_delete_items(data: ItemDeleteRequest, db: Session = Depends(get_db)):

@@ -23,6 +23,7 @@ export function ItemsPage() {
   const [batchOptions, setBatchOptions] = useState<{run_id: string; label: string}[]>([]);
   const [filterRun, setFilterRun] = useState("");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [selectAllMode, setSelectAllMode] = useState<'page' | 'all'>('page');
   const [topics, setTopics] = useState<Topic[]>([]);
 
   useEffect(() => {
@@ -149,53 +150,71 @@ export function ItemsPage() {
         )}
       </div>
 
-      {/* Item list */}
-      {selectedItems.size > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "8px 14px", background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: "0.82rem" }}>
-            <input type="checkbox" style={{ accentColor: "var(--accent)", cursor: "pointer" }}
-              checked={selectedItems.size >= (data?.total || 0)}
-              onChange={async (e) => {
-                if (e.target.checked) {
-                  // Select all matching items across ALL pages
-                  const result = await fetchItemIds({
-                    q: query || undefined,
-                    topic_id: filterTopic || undefined,
-                    source_id: filterSource || undefined,
-                    tag: filterTag || undefined,
-                    category: filterCat || undefined,
-                    run_id: filterRun || undefined,
-                  });
-                  setSelectedItems(new Set(result.ids));
-                } else {
-                  setSelectedItems(new Set());
-                }
-              }}
-            />
-            <strong>全选</strong>
-          </label>
-          <span className="text-muted small">已选 {selectedItems.size} / {data?.total || 0} 条</span>
-          <button type="button" className="btn btn-sm btn-danger" onClick={async () => {
-            const ids = Array.from(selectedItems);
-            if (!confirm(`确定删除选中的 ${ids.length} 条信息？操作不可撤销。`)) return;
-            try {
-              const r = await batchDeleteItems(ids);
-              setSelectedItems(new Set());
-              setFilterRun(""); setFilterSource(""); setFilterTopic(""); setFilterTag(""); setFilterCat("");
-              setQuery(""); setPage(1);
-              await load();
-              alert(`已删除 ${r.deleted} 条`);
-            } catch (e) {
-              alert(e instanceof Error ? e.message : "删除失败");
-            }
-          }}>
-            删除选中
-          </button>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSelectedItems(new Set())}>
-            取消选择
-          </button>
-        </div>
-      )}
+      {/* Selection toolbar (always visible) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "8px 14px", background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: "0.82rem" }}>
+          <input type="checkbox" style={{ accentColor: "var(--accent)", cursor: "pointer" }}
+            checked={Boolean(data && selectedItems.size > 0 && (selectAllMode === "all" || (selectAllMode === "page" && selectedItems.size >= data.items.length)))}
+            onChange={async (e) => {
+              if (e.target.checked && data) {
+                // First click: select all on current page
+                const pageIds = data.items.map((item) => item.id);
+                setSelectedItems(new Set(pageIds));
+                setSelectAllMode('page');
+              } else {
+                setSelectedItems(new Set());
+                setSelectAllMode('page');
+              }
+            }}
+          />
+          <strong>全选</strong>
+        </label>
+        <span className="text-muted small">已选 {selectedItems.size} / {data?.total || 0} 条</span>
+
+        {selectedItems.size > 0 && (
+          <>
+            {data && selectAllMode === 'page' && data.total > data.items.length && (
+              <button type="button" className="btn btn-sm btn-ghost" style={{ color: "var(--accent)", fontSize: "0.78rem" }} onClick={async () => {
+                const result = await fetchItemIds({
+                  q: query || undefined,
+                  topic_id: filterTopic || undefined,
+                  source_id: filterSource || undefined,
+                  tag: filterTag || undefined,
+                  category: filterCat || undefined,
+                  run_id: filterRun || undefined,
+                });
+                setSelectedItems(new Set(result.ids));
+                setSelectAllMode('all');
+              }}>
+                全选全部 {data?.total || 0} 条匹配条目
+              </button>
+            )}
+            {selectAllMode === 'all' && (
+              <span className="chip chip--blue" style={{ fontSize: "0.72rem" }}>已选择全部 ✓</span>
+            )}
+            <button type="button" className="btn btn-sm btn-danger" onClick={async () => {
+              const ids = Array.from(selectedItems);
+              if (!confirm(`确定删除选中的 ${ids.length} 条信息？操作不可撤销。`)) return;
+              try {
+                const r = await batchDeleteItems(ids);
+                setSelectedItems(new Set());
+                setSelectAllMode('page');
+                setFilterRun(""); setFilterSource(""); setFilterTopic(""); setFilterTag(""); setFilterCat("");
+                setQuery(""); setPage(1);
+                await load();
+                alert(`已删除 ${r.deleted} 条`);
+              } catch (e) {
+                alert(e instanceof Error ? e.message : "删除失败");
+              }
+            }}>
+              删除选中
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setSelectedItems(new Set()); setSelectAllMode('page'); }}>
+              取消选择
+            </button>
+          </>
+        )}
+      </div>
 
       {loading ? <div className="loading">加载条目...</div> :
        error ? <div className="error-banner">{error}</div> :
