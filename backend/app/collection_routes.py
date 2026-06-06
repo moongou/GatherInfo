@@ -481,24 +481,29 @@ def list_batches(
     db: Session = Depends(get_db),
 ):
     """List collection runs grouped by batch_id (same execution → same batch)."""
-    from sqlalchemy import func as sa_func, text as sa_text
+    # Use text() for batch_id since the column is added via ALTER TABLE
+    # and might not be recognized as an ORM attribute
+    from sqlalchemy import text as sa_text
 
-    # Find the most recent batches (distinct batch_ids)
-    q = db.query(
-        CollectionRun.batch_id,
-        sa_func.max(CollectionRun.created_at).label("last_created"),
-    )
-    if topic_id:
-        q = q.filter(CollectionRun.topic_id == topic_id)
-    q = q.filter(CollectionRun.batch_id.isnot(None))
-    q = q.group_by(CollectionRun.batch_id).order_by(sa_text("last_created DESC")).limit(limit)
-    batch_rows = q.all()
+    # Get recent runs that have a batch_id (not directly filterable via ORM)
+    q = db.query(CollectionRun).filter(
+        CollectionRun.created_at.isnot(None),
+    ).order_by(CollectionRun.created_at.desc()).limit(limit * 5).all()
+
+    # Filter to runs with batch_id set (access via attribute set by engine)
+    batch_map: dict[str, list] = {}
+    for r in q:
+        bid = getattr(r, 'batch_id', None)
+        if bid:
+            if bid not in batch_map:
+                batch_map[bid] = []
+            batch_map[bid].append(r)
 
     batches: list[BatchOut] = []
-    for batch_id, _ in batch_rows:
-        runs = db.query(CollectionRun).filter(
-            CollectionRun.batch_id == batch_id,
-        ).order_by(CollectionRun.source_id).all()
+    for batch_id, runs in sorted(batch_map.items(),
+                                 key=lambda x: max((r.created_at for r in x[1] if r.created_at), default=None) or datetime.min,
+                                 reverse=True)[:limit]:
+        runs.sort(key=lambda r: r.source_id or "")
 
         if not runs:
             continue
@@ -570,7 +575,10 @@ def list_active_runs(db: Session = Depends(get_db)):
         duration = None
         if r.started_at and not r.completed_at:
             from datetime import timezone
-            duration = int((datetime.now(timezone.utc) - r.started_at).total_seconds())
+            started = r.started_at
+            if hasattr(started, 'tzinfo') and started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            duration = int((datetime.now(timezone.utc) - started).total_seconds())
 
         result.append(ActiveRunOut(
             id=r.id, source_id=r.source_id,

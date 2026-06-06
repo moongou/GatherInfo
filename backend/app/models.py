@@ -256,6 +256,7 @@ class CollectionRun(Base):
     job_id = Column(String(80), nullable=True, index=True)
 
     status = Column(SAEnum(JobStatus), default=JobStatus.PENDING)
+    batch_id = Column(String(80), nullable=True, index=True)
     keywords_used = Column(JSON, nullable=True)
 
     # Metrics

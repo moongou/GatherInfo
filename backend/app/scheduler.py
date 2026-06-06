@@ -86,7 +86,7 @@ class CollectionScheduler:
                 jid = f"topic-{t.id}"
                 if jid in self._job_ids:
                     continue
-                if t.schedule_cron:
+                if t.schedule_cron and len(t.schedule_cron.strip().split()) == 5:
                     trigger = CronTrigger.from_crontab(t.schedule_cron, "Asia/Shanghai")
                     self._scheduler.add_job(
                         self._run_topic, trigger=trigger, id=jid,

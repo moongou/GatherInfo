@@ -58,6 +58,8 @@ class CollectionEngine:
             window_end=window_end,
         )
         run.batch_id = batch_id
+        run.status = JobStatus.RUNNING
+        run.started_at = utc_now()
         self.db.add(run)
         self.db.commit()
 
