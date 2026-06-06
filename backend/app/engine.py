@@ -245,11 +245,14 @@ class CollectionEngine:
                 if pub < window_start:
                     continue
 
-            # Keyword relevance filtering: skip items that don't match any keyword
+            # Keyword relevance filtering: skip items that don't match the keyword combination
+            # Keywords work together as a topic definition, not individually.
             if keywords:
                 text = f"{fi.title} {fi.content or ''} {fi.summary or ''}"
-                matched = any(kw.lower() in text.lower() for kw in keywords if kw)
-                if not matched:
+                matched_kws = [kw for kw in keywords if kw and kw.lower() in text.lower()]
+                total_kw = len([kw for kw in keywords if kw])
+                required = max(1, 2 if total_kw >= 3 else total_kw)
+                if len(matched_kws) < required:
                     continue
             item_id = fi.item_id(source_id)
             try:
