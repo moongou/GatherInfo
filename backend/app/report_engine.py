@@ -85,6 +85,26 @@ async def generate_report(
 
         # Build context
         item_context = _build_item_context(items)
+
+        # Translate non-Chinese items to Chinese for better report quality
+        if model and item_context:
+            try:
+                non_zh = [it for it in item_context if it.get('language', '') not in ('zh', 'zh-CN', 'cn')]
+                if non_zh and len(non_zh) <= 50:
+                    logger.info("Translating %d non-Chinese items for report %s", len(non_zh), report.id)
+                    translated = await _translate_items(model, non_zh, topic)
+                    if translated:
+                        for t in translated:
+                            for orig in item_context:
+                                if orig.get('id') == t.get('id'):
+                                    orig['title'] = t.get('title', orig['title'])
+                                    if t.get('summary'):
+                                        orig['summary'] = t.get('summary', orig['summary'])
+                                    if t.get('content'):
+                                        orig['content'] = t.get('content', orig['content'])
+            except Exception as exc:
+                logger.warning("Translation step failed (non-blocking): %s", exc)
+
         prompt = _build_report_prompt(topic, item_context, range_start, range_end)
 
         # Create report record
@@ -139,6 +159,46 @@ async def generate_report(
         raise
     finally:
         db.close()
+
+
+
+async def _translate_items(model: ModelConfig, items: list[dict], topic: Topic) -> list[dict]:
+    """Translate non-Chinese item titles and summaries to Chinese."""
+    lines = []
+    for it in items:
+        lines.append("[ID:" + str(it.get("id","")) + "] TITLE: " + str(it.get("title","")))
+        if it.get("summary"):
+            lines.append("SUMMARY: " + str(it.get("summary","")))
+        if it.get("content"):
+            lines.append("CONTENT: " + str(it.get("content",""))[:500])
+        lines.append("---")
+    text = "\n".join(lines)
+    prompt = (
+        "You are a professional translator. Translate each item below into Chinese.\n"
+        + "Keep [ID:xxx] markers unchanged. Keep the original format.\n"
+        + "Each item is separated by ---.\n\n"
+        + "Original content:\n" + text + "\n\n"
+        + "Translated items:"
+    )
+    try:
+        result = await _call_llm(model, prompt)
+        output = result.get("content", "")
+        translated = []
+        blocks = output.split("---")
+        for i, it in enumerate(items):
+            block = blocks[i] if i < len(blocks) else ""
+            new_title = str(it.get("title", ""))
+            new_summary = str(it.get("summary", "")) if it.get("summary") else ""
+            for line in block.split("\n"):
+                line = line.strip()
+                if line.startswith("TITLE:"):
+                    new_title = line[6:].strip()
+                elif line.startswith("SUMMARY:"):
+                    new_summary = line[8:].strip()
+            translated.append({"id": it.get("id", ""), "title": new_title, "summary": new_summary, "content": ""})
+        return translated
+    except Exception:
+        return []
 
 
 def _parse_iso(value: str | None) -> datetime | None:
