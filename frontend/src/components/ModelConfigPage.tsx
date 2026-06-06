@@ -178,8 +178,13 @@ export function ModelConfigPage() {
                     <div className="chip-row" style={{ marginBottom: 0 }}>
                       {listResults[m.id].models.map((mod) => (
                         <button key={mod} type="button" className={`chip ${m.model_name === mod ? "chip--blue" : ""}`}
-                          onClick={() => {
-                            setEditing({ ...m, model_name: mod } as ModelConfig);
+                          onClick={async () => {
+                            try {
+                              await updateModel(m.id, { model_name: mod });
+                              await load();
+                            } catch (e) {
+                              alert(e instanceof Error ? e.message : "选择模型失败");
+                            }
                           }}
                           title="点击选择此模型">
                           {mod}

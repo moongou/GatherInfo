@@ -500,12 +500,15 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 .multi-select-option {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 6px 12px;
   cursor: pointer;
-  font-size: 0.83rem;
+  font-size: 0.82rem;
   transition: background 0.1s;
   user-select: none;
+  color: var(--ink);
+  text-align: left;
 }
 .multi-select-option:hover { background: var(--surface-card); }
 .multi-select-option.selected { background: var(--accent-soft); }
@@ -530,4 +533,3 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
   background: rgba(59,130,246,0.04);
 }
 .multi-select-all:hover { background: rgba(59,130,246,0.08); }
-}
