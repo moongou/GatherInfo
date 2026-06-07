@@ -515,3 +515,15 @@ class SystemConfig(Base):
 
     def __repr__(self):
         return f"<SystemConfig id={self.id}>"
+
+
+class Category(Base):
+    """采集类别 — 主题的上层分类。树状结构顶层。"""
+    __tablename__ = "categories"
+    id = Column(String(80), primary_key=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    def __repr__(self):
+        return f"<Category id={self.id} name={self.name}>"

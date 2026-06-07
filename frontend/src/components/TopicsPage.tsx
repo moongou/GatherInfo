@@ -60,6 +60,7 @@ export function TopicsPage() {
   const [generating, setGenerating] = useState<string | null>(null);
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
+  const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -246,6 +247,7 @@ export function TopicsPage() {
           topic={editing}
           sources={sources}
           models={models}
+          categories={categories}
           onSave={async (data) => {
             if (editing) {
               await updateTopic(editing.id, data);
@@ -269,14 +271,16 @@ type TopicFormProps = {
   topic: Topic | null;   // null = create mode
   sources: Source[];
   models: ModelConfig[];
+  categories: {id:string;name:string}[];
   onSave: (data: Partial<Topic>) => Promise<void>;
   onClose: () => void;
 };
 
-function TopicForm({ topic, sources, models, onSave, onClose }: TopicFormProps) {
+function TopicForm({ topic, sources, models, categories, onSave, onClose }: TopicFormProps) {
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(topic?.name ?? "");
   const [desc, setDesc] = useState(topic?.description ?? "");
+  const [categoryId, setCategoryId] = useState(topic?.category_id ?? "");
   const [keywords, setKeywords] = useState((topic?.keywords ?? []).join(", "));
   const [keywordTags, setKeywordTags] = useState(
     ((topic as any)?.keyword_tags ?? []).map((kt: any) => `${kt.keyword}:${kt.weight}`).join("\n")
@@ -305,6 +309,7 @@ function TopicForm({ topic, sources, models, onSave, onClose }: TopicFormProps) 
     try {
       await onSave({
         name,
+        category_id: categoryId || null,
         description: desc || null,
         keywords: keywords.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
         keyword_tags: keywordTags ? keywordTags.split(/\r?\n/).map((s: string) => {
@@ -346,6 +351,12 @@ function TopicForm({ topic, sources, models, onSave, onClose }: TopicFormProps) 
           )}
           <label>名称 <input value={name} onChange={(e) => setName(e.target.value)} placeholder="我的采集主题" /></label>
           <label className="span-2">描述 <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="简要描述..." /></label>
+          <label className="span-2">采集类别
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">(无类别)</option>
+              {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+            </select>
+          </label>
           <label className="span-2">关键词 (逗号分隔) <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="贸易政策, 关税, RCEP" /></label>
 
           <label className="span-2">绑定信息源 (不选=所有活跃信息源)

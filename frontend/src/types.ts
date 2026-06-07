@@ -26,6 +26,8 @@ export interface Topic {
   id: string;
   name: string;
   description: string | null;
+  category_id: string | null;
+  category_name: string | null;
   keywords: string[];
   keyword_tags: KeywordTag[] | null;
   description_prompt: string | null;

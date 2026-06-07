@@ -87,6 +87,7 @@ class TopicCreate(BaseModel):
     id: str | None = Field(default=None, max_length=80, description="留空则由后端从 name 自动生成")
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    category_id: str | None = None
     keywords: list[str] = Field(default_factory=list, max_length=50)
     synonyms: list[str] | None = None
     exclude_keywords: list[str] | None = None
@@ -109,6 +110,7 @@ class TopicCreate(BaseModel):
 class TopicUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    category_id: str | None = None
     keywords: list[str] | None = None
     synonyms: list[str] | None = None
     categories: list[str] | None = None
@@ -129,6 +131,8 @@ class TopicOut(BaseModel):
     id: str
     name: str
     description: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
     keywords: list = []
     synonyms: list | None = None
     categories: list | None = None
@@ -501,6 +505,29 @@ class AutoDiscoverResult(BaseModel):
 
 class ItemDeleteRequest(BaseModel):
     item_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Category (采集类别 — 主题的上层分类)
+# ════════════════════════════════════════════════════════════════════════
+
+class CategoryCreate(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+
+class CategoryUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+class CategoryOut(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    created_at: IsoDT = None
+    updated_at: IsoDT = None
+    model_config = {"from_attributes": True}
+
 
 class SystemConfigOut(BaseModel):
     report_title_format: str = "{topic}_情报报告_{date}"

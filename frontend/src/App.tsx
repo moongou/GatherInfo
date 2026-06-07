@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings,
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree,
 } from "lucide-react";
 
 import { DashboardPage } from "./components/DashboardPage";
@@ -12,10 +12,11 @@ import { SchedulesPage } from "./components/SchedulesPage";
 import { ModelConfigPage } from "./components/ModelConfigPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { HistoryPage } from "./components/HistoryPage";
+import { CategoriesPage } from "./components/CategoriesPage";
 import { ReportsPage } from "./components/ReportsPage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-type ViewId = "dashboard" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings";
+type ViewId = "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings";
 
 interface ViewDef {
   id: ViewId;
@@ -25,6 +26,7 @@ interface ViewDef {
 
 const views: ViewDef[] = [
   { id: "dashboard", label: "仪表盘", icon: LayoutDashboard },
+  { id: "categories", label: "采集类别", icon: FolderTree },
   { id: "topics", label: "主题管理", icon: BarChart3 },
   { id: "sources", label: "信息源", icon: Globe },
   { id: "items", label: "采集条目", icon: Database },
@@ -72,6 +74,7 @@ export function App() {
         <section className="view-frame">
            <ErrorBoundary key={view}>
              {view === "dashboard" && <DashboardPage />}
+             {view === "categories" && <CategoriesPage />}
              {view === "topics" && <TopicsPage />}
              {view === "sources" && <SourcesPage />}
              {view === "items" && <ItemsPage />}

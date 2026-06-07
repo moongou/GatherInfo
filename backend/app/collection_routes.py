@@ -20,6 +20,7 @@ from app.collection_schemas import (
     ItemDeleteRequest,
     AutoDiscoverResult, BatchOut, BatchRunOut, ActiveRunOut, BatchGenerateRequest, BatchGenerateResult,
     ItemDeleteRequest,
+    CategoryCreate, CategoryUpdate, CategoryOut,
     CollectRequest, CollectResultOut, ConnectorInfo, DiscoveredProvider,
     ItemListOut, ItemOut,
     ListModelsResult, ModelConfigCreate, ModelConfigOut, ModelConfigUpdate, ModelTestResult,
@@ -34,7 +35,7 @@ from app.collection_schemas import (
 from app.database import get_db
 from app.engine import CollectionEngine
 from app.models import (
-    CollectedItem, CollectionRun, ItemStatus,
+    Category, CollectedItem, CollectionRun, ItemStatus,
     ModelConfig, Report, ScheduleConfig, SearchToolConfig,
     SourceConfig, SystemConfig, Tag, Topic, item_tags,
 )
@@ -210,9 +211,16 @@ def _source_names(db: Session, source_ids) -> list[str]:
     return [name_map.get(sid, sid) for sid in source_ids]
 
 
+def _category_name(db: Session, cat_id: str | None) -> str | None:
+    if not cat_id: return None
+    cat = db.query(Category).filter(Category.id == cat_id).first()
+    return cat.name if cat else None
+
+
 def _topic_out(db: Session, t: Topic) -> TopicOut:
     out = TopicOut.model_validate(t)
     out.source_names = _source_names(db, t.source_ids)
+    out.category_name = _category_name(db, t.category_id)
     return out
 
 
@@ -714,6 +722,41 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Categories (采集类别)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/categories", response_model=list[CategoryOut])
+def list_categories(db: Session = Depends(get_db)):
+    return db.query(Category).order_by(Category.created_at).all()
+
+@router.post("/categories", response_model=CategoryOut, status_code=201)
+def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
+    if db.query(Category).filter(Category.id == data.id).first():
+        raise HTTPException(400, f"Category '{data.id}' exists")
+    cat = Category(**data.model_dump())
+    db.add(cat); db.commit(); db.refresh(cat)
+    return cat
+
+@router.put("/categories/{category_id}", response_model=CategoryOut)
+def update_category(category_id: str, data: CategoryUpdate, db: Session = Depends(get_db)):
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat: raise HTTPException(404)
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(cat, k, v)
+    db.commit(); db.refresh(cat)
+    return cat
+
+@router.delete("/categories/{category_id}")
+def delete_category(category_id: str, db: Session = Depends(get_db)):
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat: raise HTTPException(404)
+    # Unlink topics
+    db.query(Topic).filter(Topic.category_id == category_id).update({"category_id": None})
+    db.delete(cat); db.commit()
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Tags
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -728,6 +771,41 @@ def batch_delete_items(data: ItemDeleteRequest, db: Session = Depends(get_db)):
             deleted += 1
     db.commit()
     return {"deleted": deleted, "total": len(data.item_ids)}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Categories (采集类别)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/categories", response_model=list[CategoryOut])
+def list_categories(db: Session = Depends(get_db)):
+    return db.query(Category).order_by(Category.created_at).all()
+
+@router.post("/categories", response_model=CategoryOut, status_code=201)
+def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
+    if db.query(Category).filter(Category.id == data.id).first():
+        raise HTTPException(400, f"Category '{data.id}' exists")
+    cat = Category(**data.model_dump())
+    db.add(cat); db.commit(); db.refresh(cat)
+    return cat
+
+@router.put("/categories/{category_id}", response_model=CategoryOut)
+def update_category(category_id: str, data: CategoryUpdate, db: Session = Depends(get_db)):
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat: raise HTTPException(404)
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(cat, k, v)
+    db.commit(); db.refresh(cat)
+    return cat
+
+@router.delete("/categories/{category_id}")
+def delete_category(category_id: str, db: Session = Depends(get_db)):
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat: raise HTTPException(404)
+    # Unlink topics
+    db.query(Topic).filter(Topic.category_id == category_id).update({"category_id": None})
+    db.delete(cat); db.commit()
+    return {"ok": True}
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Tags
@@ -1811,6 +1889,17 @@ def _default_sources() -> list[dict]:
             "legal_basis": "公开运费指数",
         },
     ]
+
+
+# A seeded category list used by startup auto-seed
+_DEFAULT_CATEGORIES = [
+    {"id": "trade", "name": "贸易政策"},
+    {"id": "regulation", "name": "法规与合规"},
+    {"id": "security", "name": "出口管制"},
+    {"id": "logistics", "name": "供应链与物流"},
+    {"id": "enforcement", "name": "执法与缉私"},
+    {"id": "market", "name": "市场与商品"},
+]
 
 
 def _default_topics() -> list[dict]:
