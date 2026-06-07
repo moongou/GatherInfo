@@ -144,7 +144,7 @@ export function ReportsPage() {
               ))}
             </select>
           </div>
-          <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating || !selectedTopic}>
+          <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating || !selectedTopic} style={{ alignSelf: "flex-end" }}>
             <BrainCircuit size={14} className={generating ? "spin" : ""} />
             {generating ? "生成中..." : "立即生成报告"}
           </button>
@@ -161,6 +161,10 @@ export function ReportsPage() {
               ))}
             </select>
           </div>
+          <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating || !selectedTopic} style={{ alignSelf: "flex-end" }}>
+            <BrainCircuit size={14} className={generating ? "spin" : ""} />
+            {generating ? "生成中..." : "立即生成报告"}
+          </button>
         </div>
 
         {/* Batch generation */}

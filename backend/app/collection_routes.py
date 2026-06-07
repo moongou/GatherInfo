@@ -496,7 +496,10 @@ def list_batches(
     # Get recent runs that have a batch_id (not directly filterable via ORM)
     q = db.query(CollectionRun).filter(
         CollectionRun.created_at.isnot(None),
-    ).order_by(CollectionRun.created_at.desc()).limit(limit * 5).all()
+    )
+    if topic_id:
+        q = q.filter(CollectionRun.topic_id == topic_id)
+    q = q.order_by(CollectionRun.created_at.desc()).limit(limit * 5).all()
 
     # Filter to runs with batch_id set (access via attribute set by engine)
     batch_map: dict[str, list] = {}
