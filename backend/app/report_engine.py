@@ -162,45 +162,6 @@ async def generate_report(
 
 
 
-async def _translate_items(model: ModelConfig, items: list[dict], topic: Topic) -> list[dict]:
-    """Translate non-Chinese item titles and summaries to Chinese."""
-    lines = []
-    for it in items:
-        lines.append("[ID:" + str(it.get("id","")) + "] TITLE: " + str(it.get("title","")))
-        if it.get("summary"):
-            lines.append("SUMMARY: " + str(it.get("summary","")))
-        if it.get("content"):
-            lines.append("CONTENT: " + str(it.get("content",""))[:500])
-        lines.append("---")
-    text = "\n".join(lines)
-    prompt = (
-        "You are a professional translator. Translate each item below into Chinese.\n"
-        + "Keep [ID:xxx] markers unchanged. Keep the original format.\n"
-        + "Each item is separated by ---.\n\n"
-        + "Original content:\n" + text + "\n\n"
-        + "Translated items:"
-    )
-    try:
-        result = await _call_llm(model, prompt)
-        output = result.get("content", "")
-        translated = []
-        blocks = output.split("---")
-        for i, it in enumerate(items):
-            block = blocks[i] if i < len(blocks) else ""
-            new_title = str(it.get("title", ""))
-            new_summary = str(it.get("summary", "")) if it.get("summary") else ""
-            for line in block.split("\n"):
-                line = line.strip()
-                if line.startswith("TITLE:"):
-                    new_title = line[6:].strip()
-                elif line.startswith("SUMMARY:"):
-                    new_summary = line[8:].strip()
-            translated.append({"id": it.get("id", ""), "title": new_title, "summary": new_summary, "content": ""})
-        return translated
-    except Exception:
-        return []
-
-
 def _parse_iso(value: str | None) -> datetime | None:
     """Parse an ISO date/datetime string into a tz-aware datetime, or None."""
     if not value:

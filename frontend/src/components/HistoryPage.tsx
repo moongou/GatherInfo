@@ -28,6 +28,22 @@ export function HistoryPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const handleClearHistory = async () => {
+    if (!confirm("确定要清空所有采集历史和条目？\n此操作不可撤销！\n\n将删除所有采集记录和已采集的条目。")) return;
+    if (!confirm("再次确认：真的要清空所有采集历史？")) return;
+    try {
+      const resp = await fetch("/api/v1/runs/clear", { method: "POST" });
+      const data = await resp.json();
+      if (data.ok) {
+        setActiveRuns([]);
+        setBatches([]);
+        await load();
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "清空失败");
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -35,9 +51,14 @@ export function HistoryPage() {
           <h2>采集历史</h2>
           <p className="text-muted">查看正在执行和已完成的采集任务。</p>
         </div>
-        <button type="button" className="btn btn-ghost" onClick={load} disabled={loading}>
-          <RefreshCw size={14} className={loading ? "spin" : ""} />
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button type="button" className="btn btn-sm btn-danger" onClick={handleClearHistory}>
+            <Trash2 size={12} /> 清空历史
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
+            <RefreshCw size={12} className={loading ? "spin" : ""} />
+          </button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
