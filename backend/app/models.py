@@ -200,6 +200,7 @@ class Topic(Base):
     # Enhanced topic fields (v0.3)
     keyword_tags = Column(JSON, nullable=True)
     description_prompt = Column(Text, nullable=True)
+    category_id = Column(String(80), nullable=True)
 
     # Scope
     categories = Column(JSON, nullable=True)               # 范畴分类
