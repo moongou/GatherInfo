@@ -19,6 +19,12 @@ export function ReportsPage() {
   const [selectedBatchId, setSelectedBatchId] = useState("");
   // Batch generation
   const [batchTopicIds, setBatchTopicIds] = useState<string[]>([]);
+  // Batch source: 'all' = all data, 'selected' = specific batches
+  const [batchSourceMode, setBatchSourceMode] = useState<'all' | 'selected'>('all');
+  // Per-topic batch data: {topic_id: {batch_id: {label, run_id}}}
+  const [topicBatchMeta, setTopicBatchMeta] = useState<Record<string, Record<string, {label: string; run_id: string}>>>({});
+  // Selected batch_ids per topic: {topic_id: string[]}
+  const [topicBatchSelections, setTopicBatchSelections] = useState<Record<string, string[]>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,21 +86,6 @@ export function ReportsPage() {
     setBatchTopicIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
-  };
-
-  const handleBatchGenerate = async () => {
-    if (batchTopicIds.length === 0) { alert("请至少选择一个主题"); return; }
-    setGenerating(true);
-    setGenMsg(null);
-    try {
-      const res = await batchGenerateReports(batchTopicIds, selectedModel || undefined);
-      setGenMsg(`批量生成完成：成功 ${res.results.length} 份，失败 ${res.failed} 份`);
-      setBatchTopicIds([]);
-      await load();
-    } catch (e) {
-      setGenMsg(`批量生成失败: ${e instanceof Error ? e.message : "未知错误"}`);
-    }
-    setGenerating(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -175,15 +166,103 @@ export function ReportsPage() {
         {/* Batch generation */}
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line-light)" }}>
           <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>批量生成 (多主题)</h3>
-          <div className="checkbox-grid">
+          <div style={{ marginBottom: 10, display: "flex", gap: 16, alignItems: "center", fontSize: "0.82rem" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+              <input type="radio" name="batch-source" checked={batchSourceMode === 'all'} onChange={() => setBatchSourceMode('all')} style={{ accentColor: "var(--accent)" }} />
+              所选主题的全部信息
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+              <input type="radio" name="batch-source" checked={batchSourceMode === 'selected'} onChange={async () => {
+                setBatchSourceMode('selected');
+                // Load batches for all currently selected topics
+                const meta: Record<string, Record<string, {label:string;run_id:string}>> = {};
+                for (const tid of batchTopicIds.length ? batchTopicIds : topics.map(t=>t.id)) {
+                  try {
+                    const bs = await fetchBatches(tid, 10);
+                    const map: Record<string, {label:string;run_id:string}> = {};
+                    for (const b of bs) {
+                      const lid = b.runs?.[0]?.id || "";
+                      if (lid) map[b.batch_id] = {label: b.batch_label || tid, run_id: lid};
+                    }
+                    if (Object.keys(map).length) meta[tid] = map;
+                  } catch {}
+                }
+                setTopicBatchMeta(meta);
+              }} style={{ accentColor: "var(--accent)" }} />
+              仅使用指定批次
+            </label>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {topics.map((t) => (
-              <label key={t.id} className="checkbox-item">
-                <input type="checkbox" checked={batchTopicIds.includes(t.id)} onChange={() => toggleBatchTopic(t.id)} />
-                {" "}{t.name}
-              </label>
+              <div key={t.id}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: "0.85rem", padding: "4px 0" }}>
+                  <input type="checkbox" checked={batchTopicIds.includes(t.id)} onChange={() => {
+                    toggleBatchTopic(t.id);
+                    if (batchSourceMode === 'selected') {
+                      // Load batches for this topic
+                      fetchBatches(t.id, 10).then(bs => {
+                        const map: Record<string, {label:string;run_id:string}> = {};
+                        for (const b of bs) {
+                          const lid = b.runs?.[0]?.id || "";
+                          if (lid) map[b.batch_id] = {label: b.batch_label || t.id, run_id: lid};
+                        }
+                        setTopicBatchMeta(prev => ({...prev, [t.id]: map}));
+                      }).catch(() => {});
+                    }
+                  }} style={{ accentColor: "var(--accent)" }} />
+                  <strong>{t.name}</strong>
+                  <span className="text-muted small">({t.total_items_collected} 条)</span>
+                </label>
+                {batchTopicIds.includes(t.id) && batchSourceMode === 'selected' && topicBatchMeta[t.id] && (
+                  <div style={{ marginLeft: 26, marginBottom: 4 }}>
+                    {Object.entries(topicBatchMeta[t.id]).map(([bid, info]) => (
+                      <label key={bid} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.78rem", padding: "2px 0", color: "var(--ink)" }}>
+                        <input type="checkbox" checked={(topicBatchSelections[t.id] || []).includes(bid)}
+                          onChange={() => {
+                            setTopicBatchSelections(prev => {
+                              const cur = prev[t.id] || [];
+                              const next = cur.includes(bid) ? cur.filter(x => x !== bid) : [...cur, bid];
+                              return {...prev, [t.id]: next};
+                            });
+                          }} style={{ accentColor: "var(--accent)" }} />
+                        {info.label}
+                      </label>
+                    ))}
+                    {Object.keys(topicBatchMeta[t.id]).length === 0 && (
+                      <span className="text-muted small" style={{ marginLeft: 4 }}>暂无批次数据</span>
+                    )}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
-          <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }} onClick={handleBatchGenerate} disabled={generating || batchTopicIds.length === 0}>
+
+          <button type="button" className="btn btn-secondary" style={{ marginTop: 10 }} onClick={async () => {
+            if (batchTopicIds.length === 0) { alert("请至少选择一个主题"); return; }
+            setGenerating(true);
+            setGenMsg(null);
+            try {
+              let runIds: (string | null)[] | undefined;
+              if (batchSourceMode === 'selected') {
+                runIds = batchTopicIds.map(tid => {
+                  const sels = topicBatchSelections[tid] || [];
+                  if (sels.length === 0) return null; // all data
+                  // Use the first selected batch's run_id
+                  const first = topicBatchMeta[tid]?.[sels[0]];
+                  return first?.run_id || null;
+                });
+              }
+              const res = await batchGenerateReports(batchTopicIds, selectedModel || undefined, runIds || undefined);
+              setGenMsg(`批量生成完成：成功 ${res.results.length} 份，失败 ${res.failed} 份`);
+              setBatchTopicIds([]);
+              setTopicBatchSelections({});
+              await load();
+            } catch (e) {
+              setGenMsg(`批量生成失败: ${e instanceof Error ? e.message : "未知错误"}`);
+            }
+            setGenerating(false);
+          }} disabled={generating || batchTopicIds.length === 0}>
             <BrainCircuit size={14} className={generating ? "spin" : ""} />
             {generating ? "生成中..." : `批量生成 (${batchTopicIds.length})`}
           </button>
