@@ -25,6 +25,9 @@ from app.models import CollectedItem, Topic, ModelConfig, Report
 logger = logging.getLogger(__name__)
 
 
+import asyncio
+
+
 async def generate_report(
     topic_id: str,
     model_id: str | None = None,
@@ -122,24 +125,37 @@ async def generate_report(
         )
         db.add(report)
         db.commit()
-
-        # Call the LLM
-        try:
-            result = await _call_llm(model, prompt)
-            report.content = result.get("content", "")
-            report.summary = result.get("summary", "")
-            report.tokens_used = result.get("tokens_used", 0)
-            report.status = "completed"
-            report.generated_at = datetime.now(timezone.utc)
-            # Export to disk (MD/HTML/DOCX/PDF) per SystemConfig. Best-effort.
-            _export_report_files(db, report, topic)
-        except Exception as exc:
-            report.status = "failed"
-            report.error_log = str(exc)
-            logger.error("Report generation failed: %s", exc)
-
-        db.commit()
         db.refresh(report)
+        report_id = report.id
+        report_title = report.title
+
+        # Call the LLM in a background task so the API returns immediately.
+        async def _complete_report():
+            import asyncio
+            await asyncio.sleep(0)  # yield control
+            db2 = SessionLocal()
+            try:
+                rpt = db2.query(Report).filter(Report.id == report_id).first()
+                if not rpt:
+                    return
+                try:
+                    result = await _call_llm(model, prompt)
+                    rpt.content = result.get("content", "")
+                    rpt.summary = result.get("summary", "")
+                    rpt.tokens_used = result.get("tokens_used", 0)
+                    rpt.status = "completed"
+                    rpt.generated_at = datetime.now(timezone.utc)
+                    _export_report_files(db2, rpt, topic)
+                except Exception as exc:
+                    rpt.status = "failed"
+                    rpt.error_log = str(exc)
+                    logger.error("Report %s failed: %s", report_id, exc)
+                db2.commit()
+            finally:
+                db2.close()
+
+        asyncio.ensure_future(_complete_report())
+
         return report
 
     except ValueError as exc:
