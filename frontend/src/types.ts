@@ -65,6 +65,7 @@ export interface AutoTagRule {
 export interface CollectedItem {
   id: string;
   source_id: string;
+  run_id: string | null;
   title: string;
   content: string | null;
   summary: string | null;

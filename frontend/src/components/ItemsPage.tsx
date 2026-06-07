@@ -221,22 +221,53 @@ export function ItemsPage() {
        !data ? null : (
         <>
           <div className="item-list">
-            {data.items.map((item) => (
-              <div className="item-list-row" style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <input type="checkbox" style={{ marginTop: 14, accentColor: "var(--accent)", cursor: "pointer" }}
-              checked={selectedItems.has(item.id)}
-              onChange={() => {
-                setSelectedItems((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
-                  return next;
-                });
-              }} />
-            <div style={{ flex: 1 }}>
-              <ItemCard key={item.id} item={item} />
-            </div>
-          </div>
-            ))}
+            {(() => {
+              // Group items by run_id for batch display
+              const groups = new Map<string, CollectedItem[]>();
+              for (const item of data.items) {
+                const key = item.run_id || item.source_id || "unknown";
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key)!.push(item);
+              }
+              const runLabelMap = new Map(batchOptions.map((b) => [b.run_id, b.label]));
+              const entries = Array.from(groups.entries());
+              return entries.map(([runId, items]) => (
+                <div key={runId} style={{ marginBottom: 12 }}>
+                  {/* Batch header */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "6px 12px", marginBottom: 6,
+                    background: "var(--surface-elevated)", borderRadius: "var(--radius)",
+                    fontSize: "0.78rem", color: "var(--ink-muted)",
+                    borderLeft: "3px solid var(--accent)"
+                  }}>
+                    <span style={{ fontWeight: 600, color: "var(--ink)" }}>
+                      {runLabelMap.get(runId) || "批次: " + runId.slice(0, 16)}
+                    </span>
+                    <span>{items.length} 条</span>
+                    {items[0].collected_at && (
+                      <span>{new Date(items[0].collected_at).toLocaleString("zh", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    )}
+                  </div>
+                  {items.map((item) => (
+                    <div className="item-list-row" key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <input type="checkbox" style={{ marginTop: 14, accentColor: "var(--accent)", cursor: "pointer" }}
+                        checked={selectedItems.has(item.id)}
+                        onChange={() => {
+                          setSelectedItems((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                            return next;
+                          });
+                        }} />
+                      <div style={{ flex: 1 }}>
+                        <ItemCard key={item.id} item={item} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ));
+            })()}
           </div>
 
           {/* Pagination */}

@@ -702,7 +702,8 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
     it = db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
     if not it: raise HTTPException(404)
     return ItemOut(
-        id=it.id, source_id=it.source_id, title=it.title,
+        id=it.id, source_id=it.source_id, run_id=it.run_id,
+        title=it.title,
         content=it.content, summary=it.summary, url=it.url,
         language=it.language, category=it.category, tags=_item_tags(it),
         entities=it.entities, quality_score=it.quality_score or 0,

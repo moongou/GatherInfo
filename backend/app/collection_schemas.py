@@ -222,6 +222,7 @@ class CollectResultOut(BaseModel):
 class ItemOut(BaseModel):
     id: str
     source_id: str
+    run_id: str | None = None
     title: str
     content: str | None = None
     summary: str | None = None
