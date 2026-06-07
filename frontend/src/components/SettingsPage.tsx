@@ -129,57 +129,53 @@ export function SettingsPage() {
       {/* Report settings */}
       {settings && (
         <div className="panel" style={{ marginTop: 16 }}>
-          <h3>报告设置</h3>
-          <p className="text-muted small" style={{ marginBottom: 12 }}>
-            配置生成报告的标题格式、输出目录与导出格式。标题可用 {"{topic}"} 与 {"{date}"} 占位符。
-          </p>
-          <div className="form-group">
-            <label className="text-muted small">标题格式</label>
-            <input
-              type="text"
-              title="报告标题格式"
-              value={settings.report_title_format}
-              onChange={(e) => setSettings((p) => (p ? { ...p, report_title_format: e.target.value } : p))}
-            />
-          </div>
-          <div className="form-group">
-            <label className="text-muted small">输出目录（留空使用默认 data/reports）</label>
-            <input
-              type="text"
-              value={settings.report_output_dir ?? ""}
-              placeholder="data/reports"
-              onChange={(e) => setSettings((p) => (p ? { ...p, report_output_dir: e.target.value || null } : p))}
-            />
-          </div>
-          <div className="form-group">
-            <label className="text-muted small">目录日期模式（strftime，如 %Y-%m-%d）</label>
-            <input
-              type="text"
-              title="目录日期模式"
-              value={settings.report_dir_pattern}
-              onChange={(e) => setSettings((p) => (p ? { ...p, report_dir_pattern: e.target.value } : p))}
-            />
-          </div>
-          <div className="form-group">
-            <label className="text-muted small" style={{ display: "block", marginBottom: 6 }}>导出格式</label>
-            <div className="checkbox-grid">
-              {ALL_FORMATS.map((fmt) => (
-                <label key={fmt} className="checkbox-item">
-                  <input
-                    type="checkbox"
-                    checked={settings.report_formats.includes(fmt)}
-                    onChange={() => toggleFormat(fmt)}
-                  />
-                  {fmt.toUpperCase()}
-                </label>
-              ))}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div>
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 2 }}>报告设置</h3>
+              <p style={{ fontSize: "0.78rem", color: "var(--ink-muted)" }}>
+                配置生成报告的标题格式、输出目录与导出格式。标题可用 {"{topic}"} 与 {"{date}"} 占位符。
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button type="button" className="btn btn-primary" onClick={handleSaveSettings} disabled={savingSettings} style={{ whiteSpace: "nowrap" }}>
+                <Save size={13} /> {savingSettings ? "保存中..." : "保存设置"}
+              </button>
+              {settingsMsg && <span style={{ fontSize: "0.78rem", color: "var(--ink)" }}>{settingsMsg}</span>}
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
-            <button type="button" className="btn btn-primary" onClick={handleSaveSettings} disabled={savingSettings}>
-              <Save size={14} /> {savingSettings ? "保存中..." : "保存报告设置"}
-            </button>
-            {settingsMsg && <span className="text-muted small">{settingsMsg}</span>}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)" }}>标题格式</label>
+              <input type="text" value={settings.report_title_format}
+                onChange={(e) => setSettings((p) => (p ? { ...p, report_title_format: e.target.value } : p))}
+                style={{ padding: "9px 11px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)", fontSize: "0.85rem", outline: "none" }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)" }}>输出目录</label>
+              <input type="text" value={settings.report_output_dir ?? ""} placeholder="data/reports"
+                onChange={(e) => setSettings((p) => (p ? { ...p, report_output_dir: e.target.value || null } : p))}
+                style={{ padding: "9px 11px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)", fontSize: "0.85rem", outline: "none" }} />
+              <span style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}>留空使用默认 data/reports</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)" }}>目录日期模式</label>
+              <input type="text" value={settings.report_dir_pattern} placeholder="%Y-%m-%d"
+                onChange={(e) => setSettings((p) => (p ? { ...p, report_dir_pattern: e.target.value } : p))}
+                style={{ padding: "9px 11px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)", fontSize: "0.85rem", outline: "none" }} />
+              <span style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}>strftime 格式，如 %Y-%m-%d</span>
+            </div>
+            <div>
+              <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)", display: "block", marginBottom: 6 }}>导出格式</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {ALL_FORMATS.map((fmt) => (
+                  <label key={fmt} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: "0.83rem", color: "var(--ink)", padding: "5px 10px", borderRadius: "var(--radius)", border: "1px solid " + (settings.report_formats.includes(fmt) ? "var(--accent)" : "var(--line)"), background: settings.report_formats.includes(fmt) ? "var(--accent-soft)" : "transparent", transition: "all 0.12s" }}>
+                    <input type="checkbox" checked={settings.report_formats.includes(fmt)} onChange={() => toggleFormat(fmt)}
+                      style={{ accentColor: "var(--accent)", width: 14, height: 14 }} />
+                    {fmt.toUpperCase()}
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
