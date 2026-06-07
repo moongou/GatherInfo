@@ -46,7 +46,7 @@ export function App() {
   return (
     <div className="app-shell">
       <aside className="side-rail">
-        <div className="brand">G<i>I</i></div>
+        <div className="brand">GatherInfo<div style={{ fontSize: "0.62rem", fontWeight: 400, color: "var(--ink-muted)", letterSpacing: "0.04em", marginTop: 2 }}>全球信息采集监控平台</div></div>
         <nav>
           {views.map((v) => {
             const Icon = v.icon;
@@ -69,7 +69,7 @@ export function App() {
       <main className="workspace">
         <header className="workspace-header">
           <h1>GatherInfo</h1>
-          <span className="subtitle">全球信息采集监控平台</span>
+          <span className="subtitle">主题驱动·多源采集·智能报告</span>
         </header>
         <section className="view-frame">
            <ErrorBoundary key={view}>
