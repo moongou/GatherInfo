@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { FileText, Trash2, RefreshCw, Eye, Download, BrainCircuit } from "lucide-react";
-import { fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchRuns, batchGenerateReports, exportReport, downloadReportUrl } from "../api";
-import type { Report, Topic, ModelConfig, CollectRun } from "../types";
+import { fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, batchGenerateReports, exportReport, downloadReportUrl } from "../api";
+import type { Report, Topic, ModelConfig } from "../types";
 
 export function ReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
@@ -15,10 +15,8 @@ export function ReportsPage() {
   const [genMsg, setGenMsg] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Report | null>(null);
   // Collection period controls
-  const [runs, setRuns] = useState<CollectRun[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [batchOptions, setBatchOptions] = useState<{batch_id: string; label: string; run_id: string}[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState("");
   // Batch generation
   const [batchTopicIds, setBatchTopicIds] = useState<string[]>([]);
 
@@ -42,14 +40,22 @@ export function ReportsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Load collection runs whenever the selected topic changes.
+  // Load batches whenever the selected topic changes.
   useEffect(() => {
-    setSelectedRunId("");
-    if (!selectedTopic) { setRuns([]); return; }
+    setSelectedBatchId("");
+    if (!selectedTopic) { setBatchOptions([]); return; }
     let active = true;
-    fetchRuns(selectedTopic, 20)
-      .then((rs) => { if (active) setRuns(rs); })
-      .catch(() => { if (active) setRuns([]); });
+    fetchBatches(selectedTopic, 20)
+      .then((bs) => {
+        if (!active) return;
+        const opts = bs.map((b) => ({
+          batch_id: b.batch_id,
+          label: b.batch_label || b.topic_name || "采集",
+          run_id: b.runs?.[0]?.id || "",
+        }));
+        setBatchOptions(opts);
+      })
+      .catch(() => { if (active) setBatchOptions([]); });
     return () => { active = false; };
   }, [selectedTopic]);
 
@@ -60,9 +66,7 @@ export function ReportsPage() {
     try {
       const report = await generateReport(selectedTopic, {
         modelId: selectedModel || undefined,
-        collectionRunId: selectedRunId || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        collectionRunId: selectedBatchId ? (batchOptions.find(b=>b.batch_id===selectedBatchId)?.run_id || undefined) : undefined,
       });
       setGenMsg(`报告生成${report.status === "completed" ? "完成" : report.status === "failed" ? "失败" : "中"}：${report.title}`);
       await load();
@@ -158,23 +162,13 @@ export function ReportsPage() {
         {/* Collection period scope */}
         <div className="gen-controls-row" style={{ marginTop: 12 }}>
           <div className="gen-field">
-            <label className="gen-label" htmlFor="rpt-run">采集批次</label>
-            <select id="rpt-run" value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)} disabled={!selectedTopic} style={{ flex: 1 }}>
+            <label className="gen-label" htmlFor="rpt-batch">采集批次</label>
+            <select id="rpt-batch" value={selectedBatchId} onChange={(e) => setSelectedBatchId(e.target.value)} disabled={!selectedTopic} style={{ flex: 1 }}>
               <option value="">全部批次</option>
-              {runs.map((rn) => (
-                <option key={rn.id} value={rn.id}>
-                  {rn.started_at ? new Date(rn.started_at).toLocaleString("zh") : rn.id} · 新增 {rn.items_new}
-                </option>
+              {batchOptions.map((b) => (
+                <option key={b.batch_id} value={b.batch_id}>{b.label}</option>
               ))}
             </select>
-          </div>
-          <div className="gen-field">
-            <label className="gen-label" htmlFor="rpt-from">起始日期</label>
-            <input id="rpt-from" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ flex: 1 }} />
-          </div>
-          <div className="gen-field">
-            <label className="gen-label" htmlFor="rpt-to">结束日期</label>
-            <input id="rpt-to" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ flex: 1 }} />
           </div>
         </div>
 
