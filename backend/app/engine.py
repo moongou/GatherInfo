@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
-    JobStatus, SourceConfig, Tag, Topic,
+    JobStatus, ModelConfig, SourceConfig, Tag, Topic,
 )
 
 
@@ -31,7 +31,7 @@ class CollectionEngine:
     async def collect_from_source(
         self, source_id: str, keywords: list[str], topic_id: str | None = None,
         window_start: "datetime | None" = None, window_end: "datetime | None" = None,
-        batch_id: str | None = None,
+        batch_id: str | None = None, model: ModelConfig | None = None,
     ) -> CollectResult:
         """Collect from one source with given keywords.
 
@@ -73,6 +73,15 @@ class CollectionEngine:
                                  status=JobStatus.FAILED, items=[], error_log=[str(exc)])
 
         result = await connector.execute(run, keywords)
+        # Translate non-Chinese items to Chinese before storing
+        if model and result.items:
+            try:
+                from app.report_engine import _call_llm
+                translated = await self._translate_fetch_items(result.items, model)
+                if translated:
+                    result.items = translated
+            except Exception as exc:
+                logger.warning("Item translation failed (non-blocking): %s", exc)
         self._persist_items(result.items, source.id, run.id, topic_id, window_start, keywords)
         self._update_source(source, len(result.items))
         self.db.commit()
@@ -100,9 +109,14 @@ class CollectionEngine:
         from uuid import uuid4
         batch_id = f"batch-{uuid4().hex[:12]}"
 
+        # Load default model for item translation
+        default_model = self.db.query(ModelConfig).filter(
+            ModelConfig.is_default == True, ModelConfig.is_active == True
+        ).first()
+
         # Parallel collection — topic_id flows through into runs and items
         tasks = [
-            self.collect_from_source(sid, keywords, topic.id, window_start, window_end, batch_id)
+            self.collect_from_source(sid, keywords, topic.id, window_start, window_end, batch_id, default_model)
             for sid in source_ids
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -231,6 +245,77 @@ class CollectionEngine:
                 SourceConfig.is_active == True,
             ).all()
         return self.db.query(SourceConfig).filter(SourceConfig.is_active == True).all()
+
+    async def _translate_fetch_items(self, items: list[FetchItem], model: ModelConfig) -> list[FetchItem] | None:
+        """Translate non-Chinese FetchItem titles and content to Chinese in-place."""
+        non_zh = [it for it in items if it.language and it.language not in ('zh', 'zh-CN', 'cn')]
+        if not non_zh or len(non_zh) > 30:
+            return None
+
+        lines = []
+        for it in non_zh:
+            lines.append("[ID:" + str(id(it)) + "] TITLE: " + (it.title or ""))
+            if it.summary:
+                lines.append("SUMMARY: " + it.summary)
+            if it.content:
+                lines.append("CONTENT: " + it.content[:800])
+            lines.append("---")
+        text = "\n".join(lines)
+        prompt = (
+            "Translate each item below into Chinese.\n"
+            + "Keep [ID:xxx] markers unchanged.\n"
+            + "Each item is separated by ---.\n\n"
+            + "Original:\n" + text + "\n\n"
+            + "Translations:"
+        )
+
+        import httpx
+        base_url = model.base_url or "http://localhost:11434"
+        model_name = model.model_name or ""
+
+        if model.provider == "ollama":
+            url = base_url.rstrip("/") + "/api/chat"
+            payload = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"temperature": 0.3, "num_predict": 4096},
+            }
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                output = data.get("message", {}).get("content", "")
+        else:
+            base = base_url.rstrip("/")
+            url = base + "/v1/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if model.api_key:
+                headers["Authorization"] = "Bearer " + model.api_key
+            payload = {
+                "model": model_name, "temperature": 0.3, "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                output = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        blocks = output.split("---")
+        for i, fi in enumerate(non_zh):
+            block = blocks[i] if i < len(blocks) else ""
+            for line in block.split("\n"):
+                line = line.strip()
+                if line.startswith("TITLE:"):
+                    fi.title = line[6:].strip()
+                elif line.startswith("SUMMARY:"):
+                    fi.summary = line[8:].strip()
+                elif line.startswith("CONTENT:"):
+                    fi.content = line[8:].strip()
+            fi.language = "zh"
+
+        return items
 
     def _persist_items(self, items: list[FetchItem], source_id: str, run_id: str,
                        topic_id: str | None = None, window_start: "datetime | None" = None,
