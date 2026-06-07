@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, ChevronDown } from "lucide-react";
-import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources } from "../api";
+import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories } from "../api";
 import type { Topic, CollectResult, ModelConfig, Source } from "../types";
 import { DESCRIPTION_PROMPT_TEMPLATES, KEYWORD_WEIGHT_TEMPLATES } from "../templates";
 import type { PromptTemplate, KeywordTemplate } from "../templates";
@@ -65,14 +65,16 @@ export function TopicsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [t, ms, srcs] = await Promise.all([
+      const [t, ms, srcs, cats] = await Promise.all([
         fetchTopics(),
         fetchModels().catch(() => []),
         fetchSources().catch(() => []),
+        fetchCategories().catch(() => []),
       ]);
       setTopics(t);
       setModels(ms);
       setSources(srcs);
+      setCategories(cats);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");

@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
 import { FileText, Trash2, RefreshCw, Eye, Download, BrainCircuit } from "lucide-react";
-import { fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, batchGenerateReports, exportReport, downloadReportUrl } from "../api";
+import { fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, batchGenerateReports, exportReport, downloadReportUrl, listAvailableModels } from "../api";
 import type { Report, Topic, ModelConfig } from "../types";
 
 export function ReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [models, setModels] = useState<ModelConfig[]>([]);
+  const [ollamaModels, setOllamaModels] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTopic, setSelectedTopic] = useState("");
@@ -38,6 +39,21 @@ export function ReportsPage() {
       setTopics(t);
       setModels(m);
       setError(null);
+      // For each Ollama model, fetch its locally available models
+      setOllamaModels({});
+      const ollamaConfigs = m.filter(mdl => mdl.provider === 'ollama' && mdl.is_active);
+      if (ollamaConfigs.length > 0) {
+        const results: Record<string, string[]> = {};
+        await Promise.all(ollamaConfigs.map(async (mdl) => {
+          try {
+            const res = await listAvailableModels(mdl.id);
+            if (res.success && res.models.length > 0) {
+              results[mdl.id] = res.models;
+            }
+          } catch {}
+        }));
+        setOllamaModels(results);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "失败");
     }
@@ -45,6 +61,15 @@ export function ReportsPage() {
   }, [selectedTopic]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const parseModelSelection = (value: string): { modelId: string | undefined; modelNameOverride: string | undefined } => {
+    if (!value) return { modelId: undefined, modelNameOverride: undefined };
+    const idx = value.indexOf("@@");
+    if (idx !== -1) {
+      return { modelId: value.slice(0, idx), modelNameOverride: value.slice(idx + 2) };
+    }
+    return { modelId: value, modelNameOverride: undefined };
+  };
 
   // Load batches whenever the selected topic changes.
   useEffect(() => {
@@ -70,8 +95,10 @@ export function ReportsPage() {
     setGenerating(true);
     setGenMsg(null);
     try {
+      const { modelId, modelNameOverride } = parseModelSelection(selectedModel);
       const report = await generateReport(selectedTopic, {
-        modelId: selectedModel || undefined,
+        modelId,
+        modelNameOverride,
         collectionRunId: selectedBatchId ? (batchOptions.find(b=>b.batch_id===selectedBatchId)?.run_id || undefined) : undefined,
       });
       setGenMsg(`报告生成${report.status === "completed" ? "完成" : report.status === "failed" ? "失败" : "中"}：${report.title}`);
@@ -139,9 +166,19 @@ export function ReportsPage() {
             <label className="gen-label">AI 模型</label>
             <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} style={{ flex: 1 }}>
               <option value="">{defaultModel ? `默认: ${defaultModel.name}` : "-- 默认模型 --"}</option>
-              {models.filter((m) => m.is_active).map((m) => (
-                <option key={m.id} value={m.id}>{m.name} ({m.provider}/{m.model_name}){m.is_default ? " ⭐" : ""}</option>
-              ))}
+              {models.filter((m) => m.is_active).flatMap((m) => {
+                const avail = ollamaModels[m.id];
+                if (m.provider === 'ollama' && avail && avail.length > 0) {
+                  return avail.map((modelName) => (
+                    <option key={`${m.id}@@${modelName}`} value={`${m.id}@@${modelName}`}>
+                      {m.name} / {modelName}{m.is_default ? " ⭐" : ""}
+                    </option>
+                  ));
+                }
+                return (
+                  <option key={m.id} value={m.id}>{m.name} ({m.provider}/{m.model_name}){m.is_default ? " ⭐" : ""}</option>
+                );
+              })}
             </select>
           </div>
           <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating || !selectedTopic} style={{ alignSelf: "flex-end" }}>
@@ -257,7 +294,8 @@ export function ReportsPage() {
                   return first?.run_id || null;
                 });
               }
-              const res = await batchGenerateReports(batchTopicIds, selectedModel || undefined, runIds || undefined);
+              const { modelId: batchModelId, modelNameOverride: batchModelName } = parseModelSelection(selectedModel);
+              const res = await batchGenerateReports(batchTopicIds, batchModelId || undefined, runIds || undefined, batchModelName);
               setGenMsg(`批量生成完成：成功 ${res.results.length} 份，失败 ${res.failed} 份`);
               setBatchTopicIds([]);
               setTopicBatchSelections({});

@@ -410,12 +410,14 @@ class ReportGenerateRequest(BaseModel):
     collection_run_id: str | None = None
     date_from: str | None = None
     date_to: str | None = None
+    model_name_override: str | None = None
 
 
 class BatchGenerateRequest(BaseModel):
     topic_ids: list[str] = Field(min_length=1, max_length=20)
     model_id: str | None = None
-    collection_run_ids: list[str] | None = None  # aligned with topic_ids by index
+    collection_run_ids: list[str] | None = None
+    model_name_override: str | None = None  # aligned with topic_ids by index
 
 
 class BatchGenerateResult(BaseModel):

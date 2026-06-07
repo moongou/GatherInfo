@@ -78,6 +78,13 @@ export const updateTopic = (id: string, data: Partial<Topic>) =>
   put<Topic>(`/topics/${id}`, data);
 export const deleteTopic = (id: string) => del(`/topics/${id}`);
 
+// ── Categories ──────────────────────────────────────────────────────────
+
+export const fetchCategories = () =>
+  get<{ id: string; name: string; description: string | null;
+    created_at: string | null; updated_at: string | null;
+  }[]>("/categories");
+
 // ── Schedules ───────────────────────────────────────────────────────────
 
 export const fetchSchedules = () => get<Schedule[]>("/schedules");
@@ -191,11 +198,12 @@ export const fetchReports = (topicId?: string) =>
 export const fetchReport = (id: string) => get<import("./types").Report>(`/reports/${id}`);
 export const generateReport = (
   topicId: string,
-  opts: { modelId?: string; title?: string; collectionRunId?: string; dateFrom?: string; dateTo?: string } = {},
+  opts: { modelId?: string; modelNameOverride?: string; title?: string; collectionRunId?: string; dateFrom?: string; dateTo?: string } = {},
 ) =>
   post<import("./types").Report>("/reports/generate", {
     topic_id: topicId,
     ...(opts.modelId ? { model_id: opts.modelId } : {}),
+    ...(opts.modelNameOverride ? { model_name_override: opts.modelNameOverride } : {}),
     ...(opts.title ? { title: opts.title } : {}),
     ...(opts.collectionRunId ? { collection_run_id: opts.collectionRunId } : {}),
     ...(opts.dateFrom ? { date_from: opts.dateFrom } : {}),
@@ -205,10 +213,12 @@ export const batchGenerateReports = (
   topicIds: string[],
   modelId?: string,
   collectionRunIds?: (string | null)[],
+  modelNameOverride?: string,
 ) =>
   post<import("./types").BatchGenerateResult>("/reports/batch-generate", {
     topic_ids: topicIds,
     ...(modelId ? { model_id: modelId } : {}),
+    ...(modelNameOverride ? { model_name_override: modelNameOverride } : {}),
     ...(collectionRunIds ? { collection_run_ids: collectionRunIds } : {}),
   });
 export const batchDeleteItems = (itemIds: string[]) =>

@@ -35,6 +35,7 @@ async def generate_report(
     collection_run_id: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    model_name_override: str | None = None,
 ) -> Report:
     """
     Main entry point: generate a report for a topic using the specified (or default) model.
@@ -131,10 +132,12 @@ async def generate_report(
 
         # Call the LLM in a background task so the API returns immediately.
         # Extract model attrs as a dict to avoid ORM session issues.
+        resolved_model_name = model_name_override or model.model_name
         model_attrs = {
+            "id": model.id,
             "base_url": model.base_url,
             "api_key": model.api_key,
-            "model_name": model.model_name,
+            "model_name": resolved_model_name,
             "provider": model.provider,
             "temperature": model.temperature,
             "max_tokens": model.max_tokens,
@@ -150,12 +153,10 @@ async def generate_report(
                 if not rpt:
                     return
                 try:
-                    # Re-query model from the new session
-                    m = db2.query(ModelConfig).filter(
-                        ModelConfig.is_default == True, ModelConfig.is_active == True
-                    ).first()
-                    if m:
-                        result = await _call_llm(m, prompt)
+                    # Use the captured model attrs directly — no DB re-query needed
+                    from types import SimpleNamespace
+                    m = SimpleNamespace(**model_attrs)
+                    result = await _call_llm(m, prompt)
                     rpt.content = result.get("content", "")
                     rpt.summary = result.get("summary", "")
                     rpt.tokens_used = result.get("tokens_used", 0)

@@ -2183,6 +2183,7 @@ async def generate_report(data: ReportGenerateRequest, db: Session = Depends(get
             collection_run_id=data.collection_run_id,
             date_from=data.date_from,
             date_to=data.date_to,
+            model_name_override=data.model_name_override,
         )
         return report
     except ValueError as e:
@@ -2202,7 +2203,7 @@ async def batch_generate_reports(data: BatchGenerateRequest, db: Session = Depen
 
     async def _one(idx: int, tid: str):
         run_id = run_ids[idx] if idx < len(run_ids) else None
-        return await gen(topic_id=tid, model_id=data.model_id, collection_run_id=run_id)
+        return await gen(topic_id=tid, model_id=data.model_id, collection_run_id=run_id, model_name_override=data.model_name_override)
 
     tasks = [_one(i, tid) for i, tid in enumerate(data.topic_ids)]
     raw = await asyncio.gather(*tasks, return_exceptions=True)

@@ -1,6 +1,18 @@
 # Changelog
 
 ## [0.4.0] — 2026-06-07
+## [0.4.1] — 2026-06-07
+
+### 新增功能
+- **采集类别下拉选择**：TopicsPage 新建/编辑主题时，下拉选择所有已设定的采集类别（之前仅显示「无类别」）
+- **Ollama 模型扩展选择**：ReportsPage 模型下拉自动发现 Ollama 本地所有模型，支持按具体模型名生成报告
+- **报告引擎模型选择修复**：背景任务不再强制使用默认模型，改为使用用户选定的模型；新增 model_name_override 参数
+
+### Bug 修复
+- **主题类别为空**：TopicsPage load 函数未加载 categories，新增 fetchCategories() API 调用
+- **报告模型忽视选择**：report_engine.py 背景任务 _complete_report 始终查询 is_default 模型，改为使用已捕获的 model_attrs
+- **模型名称可覆写**：新建 ReportGenerateRequest/BatchGenerateRequest 的 model_name_override 字段，支持 Ollama 等 provider 的任意本地模型
+
 
 ### 新增功能
 - **采集历史独立页面**：`HistoryPage` 组件，活跃任务实时追踪 + 已完成批次展开查看
