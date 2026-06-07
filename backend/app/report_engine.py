@@ -288,6 +288,13 @@ def _build_report_prompt(
 
     prompt = f"""你是一位专业的跨境贸易与监管情报分析师。请根据以下采集到的信息，生成一份结构化综合分析报告。
 
+【重要规则 - 必须遵守】
+⚠️ 禁止虚构：本报告必须严格基于下方【详细条目】中的数据。不得捏造任何事实、数据、引文或观点。
+⚠️ 每一条结论都必须引用对应的条目编号作为证据，格式为 [参见条目N](条目原文链接)。
+⚠️ 如果某个方向的证据不足，请明确说明"当前采集数据中未找到相关证据"。
+⚠️ 如果采集数据为空或不足以支撑报告框架，请在报告中如实反映数据局限性。
+⚠️ 所有观点必须有来源。没有来源的观点将视为无效。
+
 【主题信息】
 主题名称: {topic.name}
 主题描述: {topic.description or '(无)'}
@@ -332,7 +339,7 @@ async def _call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
         payload = {
             "model": model_name,
             "messages": [
-                {"role": "system", "content": "你是一位专业的跨境贸易与监管情报分析师。"},
+                {"role": "system", "content": "你是一位专业的跨境贸易与监管情报分析师。你只能使用下面提供的采集数据进行报告撰写。禁止虚构任何事实、数据或引用。每个观点必须有对应的条目编号和来源URL作为依据。如果采集数据不足以支持某个观点，请明确指出数据不足。如果采集数据为空，请如实报告无数据可用。"},
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
@@ -356,7 +363,7 @@ async def _call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
         payload = {
             "model": model_name,
             "messages": [
-                {"role": "system", "content": "你是一位专业的跨境贸易与监管情报分析师。"},
+                {"role": "system", "content": "你是一位专业的跨境贸易与监管情报分析师。你只能使用下面提供的采集数据进行报告撰写。禁止虚构任何事实、数据或引用。每个观点必须有对应的条目编号和来源URL作为依据。如果采集数据不足以支持某个观点，请明确指出数据不足。如果采集数据为空，请如实报告无数据可用。"},
                 {"role": "user", "content": prompt},
             ],
             "temperature": model.temperature or 0.7,
