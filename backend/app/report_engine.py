@@ -130,6 +130,17 @@ async def generate_report(
         report_title = report.title
 
         # Call the LLM in a background task so the API returns immediately.
+        # Extract model attrs as a dict to avoid ORM session issues.
+        model_attrs = {
+            "base_url": model.base_url,
+            "api_key": model.api_key,
+            "model_name": model.model_name,
+            "provider": model.provider,
+            "temperature": model.temperature,
+            "max_tokens": model.max_tokens,
+            "top_p": model.top_p,
+        }
+
         async def _complete_report():
             import asyncio
             await asyncio.sleep(0)  # yield control
@@ -139,7 +150,12 @@ async def generate_report(
                 if not rpt:
                     return
                 try:
-                    result = await _call_llm(model, prompt)
+                    # Re-query model from the new session
+                    m = db2.query(ModelConfig).filter(
+                        ModelConfig.is_default == True, ModelConfig.is_active == True
+                    ).first()
+                    if m:
+                        result = await _call_llm(m, prompt)
                     rpt.content = result.get("content", "")
                     rpt.summary = result.get("summary", "")
                     rpt.tokens_used = result.get("tokens_used", 0)
