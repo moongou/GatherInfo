@@ -198,7 +198,7 @@ export const fetchReports = (topicId?: string) =>
 export const fetchReport = (id: string) => get<import("./types").Report>(`/reports/${id}`);
 export const generateReport = (
   topicId: string,
-  opts: { modelId?: string; modelNameOverride?: string; title?: string; collectionRunId?: string; dateFrom?: string; dateTo?: string } = {},
+  opts: { modelId?: string; modelNameOverride?: string; title?: string; collectionRunId?: string; collectionRunIds?: string[]; dateFrom?: string; dateTo?: string } = {},
 ) =>
   post<import("./types").Report>("/reports/generate", {
     topic_id: topicId,
@@ -206,6 +206,7 @@ export const generateReport = (
     ...(opts.modelNameOverride ? { model_name_override: opts.modelNameOverride } : {}),
     ...(opts.title ? { title: opts.title } : {}),
     ...(opts.collectionRunId ? { collection_run_id: opts.collectionRunId } : {}),
+    ...(opts.collectionRunIds ? { collection_run_ids: opts.collectionRunIds } : {}),
     ...(opts.dateFrom ? { date_from: opts.dateFrom } : {}),
     ...(opts.dateTo ? { date_to: opts.dateTo } : {}),
   });
@@ -214,12 +215,14 @@ export const batchGenerateReports = (
   modelId?: string,
   collectionRunIds?: (string | null)[],
   modelNameOverride?: string,
+  collectionRunIdsList?: string[][],
 ) =>
   post<import("./types").BatchGenerateResult>("/reports/batch-generate", {
     topic_ids: topicIds,
     ...(modelId ? { model_id: modelId } : {}),
     ...(modelNameOverride ? { model_name_override: modelNameOverride } : {}),
     ...(collectionRunIds ? { collection_run_ids: collectionRunIds } : {}),
+    ...(collectionRunIdsList ? { collection_run_ids_list: collectionRunIdsList } : {}),
   });
 export const batchDeleteItems = (itemIds: string[]) =>
   post<{deleted: number; total: number}>("/items/batch-delete", { item_ids: itemIds });

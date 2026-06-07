@@ -26,6 +26,7 @@ export function ReportsPage() {
   const [topicBatchMeta, setTopicBatchMeta] = useState<Record<string, Record<string, {label: string; run_id: string}>>>({});
   // Selected batch_ids per topic: {topic_id: string[]}
   const [topicBatchSelections, setTopicBatchSelections] = useState<Record<string, string[]>>({});
+  const [batchSubMode, setBatchSubMode] = useState<'per_batch' | 'combined'>('per_batch');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -233,6 +234,20 @@ export function ReportsPage() {
               仅使用指定批次
             </label>
           </div>
+          {batchSourceMode === 'selected' && (
+            <div style={{ marginBottom: 10, display: "flex", gap: 12, alignItems: "center", fontSize: "0.8rem" }}>
+              <span className="text-muted">生成方式:</span>
+              <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }}>
+                <input type="radio" name="batch-sub-mode" checked={batchSubMode === 'per_batch'} onChange={() => setBatchSubMode('per_batch')} style={{ accentColor: "var(--accent)" }} />
+                按批次分别生成
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }}>
+                <input type="radio" name="batch-sub-mode" checked={batchSubMode === 'combined'} onChange={() => setBatchSubMode('combined')} style={{ accentColor: "var(--accent)" }} />
+                合并为一份报告
+              </label>
+              <span className="text-muted small">{batchSubMode === 'per_batch' ? "每个选中批次各生成一份报告" : "同一主题的所有选中批次合并为一份"}</span>
+            </div>
+          )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {topics.map((t) => (
@@ -283,25 +298,54 @@ export function ReportsPage() {
             if (batchTopicIds.length === 0) { alert("请至少选择一个主题"); return; }
             setGenerating(true);
             setGenMsg(null);
+            const { modelId: batchModelId, modelNameOverride: batchModelName } = parseModelSelection(selectedModel);
             try {
-              let runIds: (string | null)[] | undefined;
-              if (batchSourceMode === 'selected') {
-                runIds = batchTopicIds.map(tid => {
+              if (batchSourceMode === 'all') {
+                // All data mode: one report per topic
+                const res = await batchGenerateReports(batchTopicIds, batchModelId || undefined, undefined, batchModelName);
+                setGenMsg(`批量生成完成：成功 ${res.results.length} 份，失败 ${res.failed} 份`);
+              } else if (batchSourceMode === 'selected' && batchSubMode === 'combined') {
+                // Selected batches combined: each topic gets one report with all selected run_ids
+                const runIdsList = batchTopicIds.map(tid => {
                   const sels = topicBatchSelections[tid] || [];
-                  if (sels.length === 0) return null; // all data
-                  // Use the first selected batch's run_id
-                  const first = topicBatchMeta[tid]?.[sels[0]];
-                  return first?.run_id || null;
+                  return sels.map(bid => topicBatchMeta[tid]?.[bid]?.run_id).filter(Boolean) as string[];
                 });
+                // Only include topics that have at least one selected batch
+                const activeTopics = batchTopicIds.filter((_, i) => runIdsList[i].length > 0);
+                const activeRunIdsList = runIdsList.filter(r => r.length > 0);
+                if (activeTopics.length === 0) { alert("请为至少一个主题选择批次"); setGenerating(false); return; }
+                const res = await batchGenerateReports(activeTopics, batchModelId || undefined, undefined, batchModelName, activeRunIdsList);
+                setGenMsg(`合并生成完成：成功 ${res.results.length} 份，失败 ${res.failed} 份`);
+              } else {
+                // Per-batch mode: one report per (topic, selected_batch)
+                const tasks: { topicId: string; runId: string | undefined; label: string }[] = [];
+                for (const tid of batchTopicIds) {
+                  const sels = topicBatchSelections[tid] || [];
+                  const meta = topicBatchMeta[tid] || {};
+                  if (sels.length === 0) {
+                    // No batches selected for this topic — generate one report for all data
+                    tasks.push({ topicId: tid, runId: undefined, label: tid });
+                  } else {
+                    for (const bid of sels) {
+                      tasks.push({ topicId: tid, runId: meta[bid]?.run_id, label: meta[bid]?.label || tid });
+                    }
+                  }
+                }
+                if (tasks.length === 0) { alert("请至少选择一个批次"); setGenerating(false); return; }
+                const results = await Promise.all(tasks.map(t => generateReport(t.topicId, {
+                  modelId: batchModelId || undefined,
+                  modelNameOverride: batchModelName,
+                  collectionRunId: t.runId || undefined,
+                })));
+                const successCount = results.filter(r => r.status !== "failed").length;
+                const failCount = results.filter(r => r.status === "failed").length;
+                setGenMsg(`按批生成完成：成功 ${successCount} 份，失败 ${failCount} 份`);
               }
-              const { modelId: batchModelId, modelNameOverride: batchModelName } = parseModelSelection(selectedModel);
-              const res = await batchGenerateReports(batchTopicIds, batchModelId || undefined, runIds || undefined, batchModelName);
-              setGenMsg(`批量生成完成：成功 ${res.results.length} 份，失败 ${res.failed} 份`);
               setBatchTopicIds([]);
               setTopicBatchSelections({});
               await load();
             } catch (e) {
-              setGenMsg(`批量生成失败: ${e instanceof Error ? e.message : "未知错误"}`);
+              setGenMsg(`生成失败: ${e instanceof Error ? e.message : "未知错误"}`);
             }
             setGenerating(false);
           }} disabled={generating || batchTopicIds.length === 0}>

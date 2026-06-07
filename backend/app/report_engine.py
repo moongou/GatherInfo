@@ -33,6 +33,7 @@ async def generate_report(
     model_id: str | None = None,
     title_override: str | None = None,
     collection_run_id: str | None = None,
+    collection_run_ids: list[str] | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     model_name_override: str | None = None,
@@ -72,7 +73,9 @@ async def generate_report(
 
         # Fetch items for this topic (optionally scoped)
         q = db.query(CollectedItem).filter(CollectedItem.topic_id == topic_id)
-        if collection_run_id:
+        if collection_run_ids:
+            q = q.filter(CollectedItem.run_id.in_(collection_run_ids))
+        elif collection_run_id:
             q = q.filter(CollectedItem.run_id == collection_run_id)
         if dt_from:
             q = q.filter(CollectedItem.collected_at >= dt_from)

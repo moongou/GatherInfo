@@ -8,6 +8,12 @@
 - **Ollama 模型扩展选择**：ReportsPage 模型下拉自动发现 Ollama 本地所有模型，支持按具体模型名生成报告
 - **报告引擎模型选择修复**：背景任务不再强制使用默认模型，改为使用用户选定的模型；新增 model_name_override 参数
 
+
+### 新增功能
+- **批量生成子模式**：选中'仅使用指定批次'时，可选择'按批次分别生成'（每个选中批次各生成一份报告）或'合并为一份报告'（同主题所有选中批次合并生成一份报告）
+- **多批次合并报告**：后端支持 `collection_run_ids` 列表参数，使用 `SQLAlchemy .in_()` 过滤多个采集运行
+- **后端背景任务修复**：报告生成背景任务使用 `SimpleNamespace` 重构，避免 `model_attrs` 捕获后跨 session 过期
+
 ### Bug 修复
 - **主题类别为空**：TopicsPage load 函数未加载 categories，新增 fetchCategories() API 调用
 - **报告模型忽视选择**：report_engine.py 背景任务 _complete_report 始终查询 is_default 模型，改为使用已捕获的 model_attrs

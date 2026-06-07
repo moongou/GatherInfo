@@ -411,6 +411,7 @@ class ReportGenerateRequest(BaseModel):
     date_from: str | None = None
     date_to: str | None = None
     model_name_override: str | None = None
+    collection_run_ids: list[str] | None = None
 
 
 class BatchGenerateRequest(BaseModel):
