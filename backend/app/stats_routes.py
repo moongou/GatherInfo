@@ -83,7 +83,7 @@ def dashboard(db: Session = Depends(get_db)):
         "languages": [{"language": l or "unknown", "count": n} for l, n in lang_rows],
         "top_tags": [{"id": t.id, "namespace": t.namespace, "value": t.value, "count": t.item_count}
                      for t in top_tags],
-        "source_health": source_health,
+        "source_health": sorted(source_health, key=lambda x: x.get("items_collected", 0), reverse=True),
         "daily_trend": daily_counts[::-1],  # oldest first
     }
 
