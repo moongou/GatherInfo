@@ -3,7 +3,7 @@ import { Download, Upload, AlertTriangle, CheckCircle, X, Save } from "lucide-re
 import { exportConfig, importConfig, fetchSettings, updateSettings } from "../api";
 import type { SystemConfig } from "../types";
 
-const ALL_FORMATS = ["md", "html", "docx", "pdf"];
+const ALL_FORMATS = ["docx", "pdf"];
 
 export function SettingsPage() {
   const [exporting, setExporting] = useState(false);

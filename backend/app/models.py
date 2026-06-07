@@ -508,7 +508,7 @@ class SystemConfig(Base):
     report_title_format = Column(String(300), default="{topic}_情报报告_{date}")
     report_output_dir = Column(String(800), nullable=True)        # absolute root dir; None => <data>/reports
     report_dir_pattern = Column(String(100), default="%Y-%m-%d")  # date-based subfolder pattern
-    report_formats = Column(JSON, default=lambda: ["md", "html", "docx", "pdf"])
+    report_formats = Column(JSON, default=lambda: ["docx", "pdf"])
 
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
