@@ -68,8 +68,31 @@ export function App() {
       </aside>
       <main className="workspace">
         <header className="workspace-header">
-          <h1>GatherInfo</h1>
-          <span className="subtitle">主题驱动·多源采集·智能报告</span>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+            <h1>GatherInfo</h1>
+            <span className="subtitle">主题驱动·多源采集·智能报告</span>
+          </div>
+          <div className="app-logo" style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 36, height: 36, borderRadius: 10,
+            background: "linear-gradient(135deg, rgba(59,130,246,0.18), rgba(34,197,94,0.10))",
+            border: "1px solid rgba(59,130,246,0.25)",
+            position: "relative", overflow: "hidden"
+          }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="9" stroke="#3b82f6" strokeWidth="1.5" opacity="0.7"/>
+              <ellipse cx="12" cy="12" rx="7" ry="2.5" stroke="#3b82f6" strokeWidth="0.8" opacity="0.5"/>
+              <ellipse cx="12" cy="9" rx="6" ry="1.5" stroke="#3b82f6" strokeWidth="0.6" opacity="0.3"/>
+              <ellipse cx="12" cy="15" rx="6" ry="1.5" stroke="#3b82f6" strokeWidth="0.6" opacity="0.3"/>
+              <line x1="12" y1="3" x2="12" y2="21" stroke="#3b82f6" strokeWidth="0.8" opacity="0.4"/>
+              <text x="12" y="16" textAnchor="middle" fontSize="11" fontWeight="700" fill="#3b82f6" fontFamily="Inter, sans-serif" letterSpacing="0.5">g</text>
+              <circle cx="20" cy="7" r="1.5" fill="#22c55e" opacity="0.8"/>
+              <circle cx="19" cy="18" r="1" fill="#22c55e" opacity="0.5"/>
+              <circle cx="5" cy="17" r="1.2" fill="#22c55e" opacity="0.6"/>
+              <circle cx="4" cy="8" r="0.8" fill="#22c55e" opacity="0.4"/>
+              <path d="M12 3 A9 9 0 0 1 20.5 7.5" stroke="#22c55e" strokeWidth="1.2" strokeLinecap="round" opacity="0.6"/>
+            </svg>
+          </div>
         </header>
         <section className="view-frame">
            <ErrorBoundary key={view}>
