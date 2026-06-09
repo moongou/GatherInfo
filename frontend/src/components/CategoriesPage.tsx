@@ -1,3 +1,4 @@
+import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, Edit3, FolderTree } from "lucide-react";
 
@@ -13,6 +14,7 @@ export function CategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [editing, setEditing] = useState<Category | null>(null);
 
   const load = useCallback(async () => {
@@ -30,13 +32,19 @@ export function CategoriesPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(`删除类别 "${id}"？关联的主题将变为未分类。`)) return;
+  const handleDelete = (id: string) => {
+    setConfirmDelete({ id, message: `删除类别 "${id}"？关联的主题将变为未分类。` });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const id = confirmDelete.id;
     try {
       const resp = await fetch(`${BASE}/categories/${id}`, { method: "DELETE" });
       if (!resp.ok) throw new Error(await resp.text());
       setCategories((p) => p.filter((c) => c.id !== id));
     } catch (e) { alert(e instanceof Error ? e.message : "删除失败"); }
+    setConfirmDelete(null);
   };
 
   if (loading) return <div className="loading">加载类别...</div>;

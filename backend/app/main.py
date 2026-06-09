@@ -17,7 +17,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import init_db
-from app.collection_routes import router as collection_router
+from app.routes.sources import router as sources_router
+from app.routes.topics import router as topics_router
+from app.routes.items import router as items_router
+from app.routes.tags import router as tags_router
+from app.routes.reports import router as reports_router
+from app.routes.models import router as models_router
+from app.routes.schedules import router as schedules_router
+from app.routes.search_tools import router as search_tools_router
+from app.routes.settings import router as settings_router
+from app.routes.seed import router as seed_router
+from app.routes.notifications import router as notifications_router
 from app.stats_routes import router as stats_router
 
 logger = logging.getLogger(__name__)
@@ -95,7 +105,7 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-# ── Exception handler ─────────────────────────────────────────────────
+# ── Exception handlers ─────────────────────────────────────────────────
 
 async def validation_exception_handler(request: Request, exc):
     """Return consistent error responses for validation failures."""
@@ -106,6 +116,28 @@ async def validation_exception_handler(request: Request, exc):
             "errors": exc.errors(),
         },
     )
+
+
+async def value_error_handler(request: Request, exc: ValueError):
+    """ValueError → 400 Bad Request."""
+    logger.warning("ValueError in %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+async def lookup_error_handler(request: Request, exc: LookupError):
+    """LookupError (KeyError, IndexError) → 404 Not Found."""
+    logger.warning("LookupError in %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=404, content={"detail": "Resource not found"})
+
+
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Catch-all → 500 Internal Server Error with full traceback."""
+    logger.error(
+        "Unhandled exception in %s %s: %s",
+        request.method, request.url.path, exc,
+        exc_info=True,
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # ── Health check ──────────────────────────────────────────────────────
@@ -140,7 +172,7 @@ def _startup_diagnostics():
                 active_sources, active_models,
             )
             try:
-                from app.collection_routes import (
+                from app.routes.seed import (
                     _default_sources, _default_topics, _default_models,
                     _default_search_tools, _default_keyword_tags, _default_description_prompt,
                     _DEFAULT_CATEGORIES,
@@ -230,6 +262,9 @@ def create_app() -> FastAPI:
 
     # Register custom validation exception handler
     app.add_exception_handler(422, validation_exception_handler)
+    app.add_exception_handler(ValueError, value_error_handler)
+    app.add_exception_handler(LookupError, lookup_error_handler)
+    app.add_exception_handler(Exception, generic_exception_handler)
 
     # Add logging middleware
     app.middleware("http")(log_requests)
@@ -263,8 +298,18 @@ def create_app() -> FastAPI:
         }
 
     # ── Collection is the core ─────────────────────────────────────────
-    app.include_router(collection_router)
+    app.include_router(sources_router)
+    app.include_router(topics_router)
+    app.include_router(items_router)
+    app.include_router(tags_router)
+    app.include_router(reports_router)
+    app.include_router(models_router)
+    app.include_router(schedules_router)
+    app.include_router(search_tools_router)
+    app.include_router(settings_router)
+    app.include_router(seed_router)
     app.include_router(stats_router)
+    app.include_router(notifications_router)
 
     return app
 

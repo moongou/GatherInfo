@@ -1,7 +1,7 @@
 // GatherInfo — API client
 import type {
   Source, Topic, Schedule, Tag, TagStats, Stats,
-  DashboardData, CollectedItem, ItemList,
+  DashboardData, CollectedItem, ItemList, NotificationConfig,
   CollectResult, ConnectorInfo, CollectRun,
 } from "./types";
 
@@ -58,7 +58,10 @@ async function del(path: string): Promise<void> {
 
 // ── Sources ─────────────────────────────────────────────────────────────
 
-export const fetchSources = () => get<Source[]>("/sources");
+export const fetchSources = (configured?: boolean) => {
+  const qs = configured !== undefined ? `?configured=${configured}` : "";
+  return get<Source[]>(`/sources${qs}`);
+};
 export const fetchSource = (id: string) => get<Source>(`/sources/${id}`);
 export const createSource = (data: Partial<Source> & { name: string; channel: string }) =>
   post<Source>("/sources", data);
@@ -271,3 +274,49 @@ export const autoDiscoverModels = () =>
 
 export const exportConfig = () => get<any>("/config/export");
 export const importConfig = (data: any) => post<{imported: Record<string, number>; conflicts: any[]; conflict_count: number}>("/config/import", data);
+
+// ── FTS Search ──────────────────────────────────────────────────────
+
+export const searchItems = (
+  q: string,
+  opts: { topicId?: string; sourceId?: string; page?: number; pageSize?: number } = {},
+) => {
+  const params: Record<string, string> = { q };
+  if (opts.topicId) params.topic_id = opts.topicId;
+  if (opts.sourceId) params.source_id = opts.sourceId;
+  if (opts.page) params.page = String(opts.page);
+  if (opts.pageSize) params.page_size = String(opts.pageSize);
+  return get<import("./types").ItemList>("/items/search", params);
+};
+
+// ── Data Export ─────────────────────────────────────────────────────
+
+export const exportItems = (
+  format: "csv" | "json" | "xlsx" = "csv",
+  filters: { topicId?: string; sourceId?: string; category?: string; tag?: string; language?: string; q?: string } = {},
+) => {
+  const params: Record<string, string> = { format };
+  if (filters.topicId) params.topic_id = filters.topicId;
+  if (filters.sourceId) params.source_id = filters.sourceId;
+  if (filters.category) params.category = filters.category;
+  if (filters.tag) params.tag = filters.tag;
+  if (filters.language) params.language = filters.language;
+  if (filters.q) params.q = filters.q;
+  const url = new URL(`${BASE}/items/export`, window.location.origin);
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, v);
+  }
+  return url.toString();
+};
+
+// ── Notifications ───────────────────────────────────────────────────
+
+
+export const fetchNotifications = () => get<NotificationConfig[]>("/notifications");
+export const createNotification = (data: Partial<NotificationConfig> & { name: string; channel: string }) =>
+  post<NotificationConfig>("/notifications", data);
+export const updateNotification = (id: string, data: Partial<NotificationConfig>) =>
+  put<NotificationConfig>(`/notifications/${id}`, data);
+export const deleteNotification = (id: string) => del(`/notifications/${id}`);
+export const testNotification = (id: string) =>
+  post<{ success: boolean; message: string }>("/notifications/test", { id });

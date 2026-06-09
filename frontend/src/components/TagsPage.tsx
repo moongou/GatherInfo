@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { fetchTags, fetchTagStats, updateTag, deleteTag, mergeTags, fetchItems } from "../api";
 import type { Tag, TagStats, CollectedItem } from "../types";
+import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { EChart } from "./EChart";
 import { Trash2, Edit3, GitMerge, List } from "lucide-react";
 
@@ -31,6 +32,8 @@ export function TagsPage() {
   const [mergeSource, setMergeSource] = useState("");
   const [mergeTarget, setMergeTarget] = useState("");
   const [merging, setMerging] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{id: string; value: string} | null>(null);
+  const [confirmMerge, setConfirmMerge] = useState(false);
   const [mergeMsg, setMergeMsg] = useState<string | null>(null);
   // Tag detail (last items)
   const [detailTag, setDetailTag] = useState<Tag | null>(null);
@@ -58,7 +61,12 @@ export function TagsPage() {
     if (mergeSource === mergeTarget) { alert("源标签和目标标签不能相同"); return; }
     const srcTag = tags.find((t) => t.id === mergeSource);
     const tgtTag = tags.find((t) => t.id === mergeTarget);
-    if (!confirm(`将标签 "${srcTag?.value}" 合并到 "${tgtTag?.value}"？\n源标签的所有条目关系将转移，随后源标签被删除。`)) return;
+    setConfirmMerge(true);
+    return;
+  };
+
+  const executeMerge = async () => {
+    setConfirmMerge(false);
     setMerging(true);
     setMergeMsg(null);
     try {
@@ -73,8 +81,13 @@ export function TagsPage() {
     setMerging(false);
   };
 
-  const handleDelete = async (tagId: string, tagValue: string) => {
-    if (!confirm(`确定删除标签 "${tagValue}" (${tagId})？\n该操作会移除所有条目上的此标签关系。`)) return;
+  const handleDelete = (tagId: string, tagValue: string) => {
+    setConfirmDelete({ id: tagId, value: tagValue });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const { id: tagId, value: tagValue } = confirmDelete;
     setDeleting(tagId);
     try {
       await deleteTag(tagId);
@@ -84,6 +97,7 @@ export function TagsPage() {
       alert(e instanceof Error ? e.message : "删除失败");
     }
     setDeleting(null);
+    setConfirmDelete(null);
   };
 
   const handleUpdate = async (tagId: string, data: Partial<Tag>) => {

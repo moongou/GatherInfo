@@ -1,177 +1,321 @@
-# 全球跨境贸易监管与风险情报智能感知平台
+# GatherInfo — 全球贸易情报采集监控平台
 
-这是一个可运行的全栈高保真原型，覆盖跨境贸易监管情报平台的核心闭环：多源感知、风险融合、知识图谱、智能问答、沙盘推演、自动简报与全链路审计。
+<p align="center">
+  <strong>主题驱动 · 多源采集 · 智能报告 · 标签化入库</strong>
+</p>
 
-## 已落地能力
+GatherInfo 是一个面向跨境贸易情报分析师与海关合规人员的全栈信息采集监控平台。支持 RSS、网页抓取、官方 API、搜索引擎、JSON API 等 9 种渠道，覆盖全球 83 个免费信息源，内置全文搜索、智能报告生成、周期调度与通知系统。
 
-- **指挥驾驶舱**：全球风险热力点、TBT/SPS 指标、走私异常信号、事件时间轴、信源健康度。
-- **情报工作台**：RaQ 风格自然语言问答，返回结构化答案、置信度、引用来源与下一步建议。
-- **风险知识图谱**：以国家、机构、商品、企业、港口、措施、事件为节点，展示风险传导路径。
-- **沙盘推演**：围绕地区、商品与政策假设生成 6-12 个月影响曲线和应对动作。
-- **自动简报**：生成每日情报简报结构，包含战略态势、技贸措施、执法线索和模型解释。
-- **合规与审计**：每条样例情报携带来源、口径、采集时间、处理链路和授权状态。
+---
 
-## 安全边界
+## 功能概览
 
-本原型不实现验证码绕过、未授权暗网采集、规避访问控制或对第三方平台条款的绕行。相关模块以合规门禁、授权字段、审计流水和隔离接口形式呈现，便于后续在合法授权环境中接入真实探针。
+### 核心闭环
+
+```
+定义主题(关键词+信源) → 周期/手动采集 → 去重入库 → 自动打标签 → 智能报告 → 导出分发
+```
+
+| 模块 | 能力 |
+|------|------|
+| **仪表盘** | 统计概览、采集趋势图、分类分布饼图、信源采集量柱状图、热门标签云、快速采集卡片 |
+| **信息源管理** | 83 个预配置免费源（RSS/官方/网页）+ 9 种渠道类型，支持连接验证、搜索、分类筛选 |
+| **主题管理** | CRUD + 关键词模板推荐 + 多选信源绑定 + Cron 周期调度 + 自动标签规则 + 自动报告 |
+| **条目浏览** | 全文检索(FTS5)、标签/信源/语言/分类过滤、分页浏览、批量选择删除、CSV/JSON/XLSX 导出 |
+| **标签系统** | 命名空间管理、M:N 关联、标签合并、统计分析 |
+| **智能报告** | 调用 LLM 生成分析报告，支持 Markdown/HTML/DOCX/PDF 导出，批量生成 |
+| **采集历史** | 批次视图、活跃任务实时追踪、展开查看详情、错误日志 |
+| **周期调度** | 全局调度 + 主题级别 Cron，灵活绑定信源和主题 |
+| **通知系统** | Webhook / Email 通知，fire-and-forget 模式 |
+| **配置管理** | 系统设置、模型配置、配置导出/导入 |
+
+---
 
 ## 技术栈
 
-- 后端：FastAPI + Pydantic 服务层架构
-- 前端：React + TypeScript + Vite + ECharts + Lucide Icons
-- 数据：合成演示数据，所有指标与来源均有 provenance 字段，便于替换为真实湖仓、图数据库和全文索引
+| 层级 | 技术 |
+|------|------|
+| **前端** | React 18 + TypeScript + Vite (Rolldown) + ECharts + Lucide Icons |
+| **后端** | Python FastAPI + SQLAlchemy 2.0 + Pydantic v2 |
+| **数据库** | SQLite (WAL 模式)，内置 FTS5 全文搜索 |
+| **采集** | httpx (异步 HTTP) + BeautifulSoup4 (网页解析) |
+| **调度** | APScheduler (Cron 表达式) |
+| **AI** | 多模型支持 (OpenAI / Ollama / 自定义)，LLM 客户端可扩展 |
+| **报告** | WeasyPrint (PDF) / Pandoc (DOCX)，缺失时不阻塞 |
+| **容器化** | Dockerfile.backend + Dockerfile.frontend + docker-compose.yml |
+
+---
 
 ## 快速启动
 
+### 环境要求
+
+- Python 3.12+
+- Node.js 22+
+- npm 10+
+
+### 一键启动
+
 ```bash
-cd /Users/m4max/VS-CODE-PROJECT/GatherInfo
+cd GatherInfo
 
-/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv backend/.venv
-backend/.venv/bin/python -m pip install -r backend/requirements.txt
-
+# 首次运行：安装依赖
 npm --prefix frontend install
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt
+
+# 启动前后端开发服务器
 npm run dev
 ```
 
-访问前端：`http://127.0.0.1:5178`
+- 前端: http://localhost:5178
+- 后端 API: http://localhost:8109
+- API 文档: http://localhost:8109/docs
+- Dev Dashboard: http://localhost:9999
 
-后端 API：`http://127.0.0.1:8108/docs`
-
-## 验证命令
-
-```bash
-npm run typecheck
-npm run build
-npm run test:backend
-```
-
-## 真实生产化扩展路径
-
-1. 将 `backend/app/data.py` 的合成数据替换为 Kafka/Flink/Airbyte 摄入后的湖仓查询。
-2. 将 `IntelligenceService` 拆分为采集、翻译、抽取、图谱、检索、报告等独立微服务。
-3. 用 Neo4j、Elasticsearch/OpenSearch、ClickHouse、MinIO 接管图谱、全文、分析与原文存储。
-4. 将 `/api/intel/query` 接入私有化 LLM 与向量检索，并保留引用来源与推理路径。
-5. 对深网/暗网与商业数据库接入启用审批、隔离、审计、脱敏和只读导出策略。
-
-## 全球信息采集子系统 (v0.2)
-
-### 架构概览
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    Collection Engine                          │
-│  (编排层: 调度、去重、持久化、统计)                              │
-├──────────┬──────────┬──────────┬──────────┬───────────────────┤
-│  官方API  │   RSS    │ 网页抓取   │   搜索    │   商业API         │
-│ (WTO,EU, │ (Feeds)  │ (BS4)    │ (Tavily)  │  (授权接入)         │
-│  中国海关, │          │           │           │                    │
-│  商务部)  │          │           │           │                    │
-└──────────┴──────────┴──────────┴──────────┴───────────────────┘
-         │          │          │          │
-         └──────────┴──────────┴──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │    SQLite / PG       │
-         │  (来源、主题、条目、HS) │
-         └─────────────────────┘
-```
-
-### 核心能力
-
-| 能力 | 说明 |
-|------|------|
-| **可配置信息源** | 支持 official / rss / web_scrape / api_search / commercial / social / deepweb / manual 等8种渠道 |
-| **主题采集** | 设定主题（如 "中国HS编码"、"TBT/SPS通报"），关联关键词和信息源，一次性跨源并行采集 |
-| **周期调度** | 标准5字段Cron表达式，按信息源或主题设置定时采集任务 |
-| **去重存储** | SHA-256内容哈希，按 source+title+url 生成的确定性ID去重 |
-| **HS Code专表** | 独立的 `hs_codes` 表，记录HS编码、中英文描述、税率、监管机构等 |
-| **合规审计** | 每次采集Run记录 status、耗时、错误日志；来源配置记录 legal_basis / compliance_note |
-
-### 已配置的中国和国际数据源
-
-| 信息源ID | 名称 | 渠道 | 聚焦 |
-|----------|------|------|------|
-| `cn-customs` | 中国海关总署 (GACC) | web_scrape | 公告、政策、HS编码 |
-| `cn-mofcom` | 中国商务部 (MOFCOM) | web_scrape | 贸易政策、反倾销、出口管制 |
-| `cn-aqsiq` | 海关商品检验 (AQSIR) | web_scrape | TBT/SPS、检验检疫标准 |
-| `wto-eping` | WTO ePing TBT/SPS | official | TBT/SPS通报 |
-| `eu-eurlex` | EU EUR-Lex | official | 欧盟法规、指令 |
-| `un-comtrade` | UN Comtrade | official | 国际贸易统计数据 |
-| `tavily-global-trade` | Tavily全球搜索 | api_search | 中文+英文网络搜索 |
-| `wto-rss` | WTO官方新闻 | rss | RSS订阅 |
-| `hs-codes-CN` | 中国HS编码全量 | web_scrape | HS编码详细页面 |
-
-### 预置采集主题
-
-| 主题ID | 名称 | 调度 | 关键词数 |
-|--------|------|------|----------|
-| `hs-codes-cn` | 中国HS编码全量信息 | 周日 03:00 | 6 |
-| `tbt-sps-china` | TBT/SPS技术性贸易措施 | 每日 08:00 | 10 |
-| `trade-barriers-cn` | 贸易壁垒与反倾销动态 | 工作日 09:00 | 8 |
-| `customs-clearance` | 海关清关与商品归类 | 工作日 10:00 | 7 |
-
-### 快速开始
+### Docker 部署
 
 ```bash
-# 设置环境变量
-export TAVILY_API_KEY=tvly-dev-xxx
-export COMTRADE_API_KEY=xxx  # 可选
-
-# 启动服务
-cd backend && PYTHONPATH=. .venv/bin/uvicorn app.main:app --port 8108
-
-# 初始化默认信息源和主题
-curl -X POST http://127.0.0.1:8108/api/collection/seed-defaults
-
-# 手动触发采集
-curl -X POST http://127.0.0.1:8108/api/collection/run \
-  -H "Content-Type: application/json" \
-  -d '{"topic_id": "hs-codes-cn"}'
-
-# 查看结果
-curl http://127.0.0.1:8108/api/collection/items
-
-# 搜索HS编码
-curl -X POST http://127.0.0.1:8108/api/collection/hs-codes/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "锂电池"}'
-
-# 查看采集统计
-curl http://127.0.0.1:8108/api/collection/stats
+docker-compose up
 ```
 
-### API 端点一览
+---
 
-| 方法 | 路径 | 功能 |
+## 信息源管理
+
+### 渠道类型
+
+| 渠道 | 标识 | 说明 | 是否需要 API Key |
+|------|------|------|:---:|
+| 官方 API | `official` | WTO ePing, EU EUR-Lex 等 | 否 |
+| RSS/Atom | `rss` | RSS 订阅源采集 | 否 |
+| 网页抓取 | `web_scrape` | CSS 选择器 + BS4 解析 | 否 |
+| Web 搜索 | `api_search` | Tavily / Baidu / Bing | **是** |
+| JSON API | `json_api` | NewsAPI, UN Comtrade 等 | **是** |
+| 商业数据库 | `commercial` | 授权商业数据 | **是** |
+| 社交媒体 | `social` | 社媒监控 | **是** |
+| 深网 | `deepweb` | 深网数据源 | **是** |
+| 手动录入 | `manual` | 人工添加 | 否 |
+
+### 源配置状态
+
+当前系统预置 **92 个信息源**：
+- ✅ **83 个已配置**，可直接使用（RSS / 网页抓取 / 官方 API）
+- ⏳ **9 个待配置**，需填入 API Key 后激活
+
+### 已覆盖的全球免费信源（部分）
+
+**国际组织与协定：** WTO、UNCTAD、OECD、IMF、World Bank、IISD、ADB、ASEAN、PIIE、CSIS、Global Trade Alert、EAEU
+
+**主要经济体海关与贸易机构：**
+US (CBP/USTR/USITC/BIS/OFAC) · EU (Trade/Customs/EUR-Lex) · UK · Canada · Australia · New Zealand · Singapore · 香港 · 日本 METI · Korea
+
+**新兴市场海关：** India DGFT · Brazil MDIC · South Africa SARS · Turkey · Vietnam · Indonesia · Mexico · Thailand · Philippines · Malaysia · Chile · Argentina · Nigeria · Kenya · Egypt · Colombia · Peru · Pakistan · Bangladesh · Sri Lanka
+
+**中国监管：** 海关总署 · 商务部 · 自由贸易区服务网
+
+---
+
+## 项目架构
+
+```
+GatherInfo/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                 # FastAPI 应用工厂 + CORS + 限流
+│   │   ├── database.py             # SQLAlchemy 引擎/会话/备份
+│   │   ├── models.py               # ORM 模型导出中心
+│   │   ├── engine.py               # 采集引擎编排
+│   │   ├── scheduler.py            # APScheduler 调度集成
+│   │   ├── report_engine.py        # 智能报告生成
+│   │   ├── llm_client.py           # LLM 调用客户端
+│   │   ├── fts_search.py           # SQLite FTS5 全文搜索
+│   │   ├── stats_routes.py         # 仪表盘统计 API
+│   │   ├── notification_models.py  # 通知模型与发送
+│   │   ├── routes/                 # 15 个路由模块
+│   │   │   ├── topics.py           # 主题 CRUD + 采集
+│   │   │   ├── sources.py          # 信息源 CRUD
+│   │   │   ├── items.py            # 条目查询/搜索/导出
+│   │   │   ├── tags.py             # 标签管理
+│   │   │   ├── reports.py          # 报告生成/导出
+│   │   │   ├── models.py           # 模型配置
+│   │   │   ├── schedules.py        # 调度管理
+│   │   │   ├── settings.py         # 系统配置
+│   │   │   ├── notifications.py    # 通知配置
+│   │   │   ├── export_routes.py    # 数据导出
+│   │   │   ├── search_tools.py     # 搜索工具
+│   │   │   ├── seed.py             # 种子数据 API
+│   │   │   └── _seed_sources.py    # 92 个预置信息源
+│   │   ├── services/               # 业务逻辑层
+│   │   │   ├── source_service.py
+│   │   │   ├── topic_service.py
+│   │   │   ├── item_service.py
+│   │   │   ├── tag_service.py
+│   │   │   └── report_service.py
+│   │   └── connectors/             # 连接器系统
+│   │       ├── base.py             # 抽象基类 + 注册表
+│   │       ├── rss_collector.py    # RSS/Atom
+│   │       ├── web_scrape.py       # 网页抓取
+│   │       ├── tavily_search.py    # Tavily 搜索
+│   │       ├── search_engines.py   # 搜索分发器
+│   │       ├── official_api.py     # 官方 API
+│   │       └── json_api.py         # JSON API 直连
+│   └── tests/                      # 258 个测试用例 (17 文件)
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx                 # 导航框架 + 视图路由
+│   │   ├── api.ts                  # API 客户端 (40+ 接口)
+│   │   ├── types.ts                # TypeScript 类型定义
+│   │   ├── styles.css              # 设计系统 (深色主题)
+│   │   ├── hooks/                  # 公共 Hooks
+│   │   │   ├── useApi.ts           # 通用 async 请求
+│   │   │   ├── useDebounce.ts      # 输入防抖
+│   │   │   └── usePagination.ts    # 分页状态
+│   │   └── components/             # 25 个页面组件
+│   │       ├── shared/             # 6 个共享组件
+│   │       │   ├── Modal.tsx
+│   │       │   ├── ConfirmDialog.tsx
+│   │       │   ├── EmptyState.tsx
+│   │       │   ├── StatusBadge.tsx
+│   │       │   ├── MultiSelect.tsx
+│   │       │   └── RenderMarkdown.tsx
+│   │       ├── DashboardPage.tsx
+│   │       ├── TopicsPage.tsx
+│   │       ├── SourcesPage.tsx
+│   │       ├── ItemsPage.tsx
+│   │       ├── TagsPage.tsx
+│   │       ├── ReportsPage.tsx
+│   │       ├── SchedulesPage.tsx
+│   │       ├── SettingsPage.tsx
+│   │       ├── ModelConfigPage.tsx
+│   │       ├── HistoryPage.tsx
+│   │       ├── NotificationsPage.tsx
+│   │       ├── CategoriesPage.tsx
+│   │       └── ... (子组件)
+│   └── vite.config.ts
+├── docker-compose.yml
+├── Dockerfile.backend
+├── Dockerfile.frontend
+├── scripts/
+│   └── dev.sh                     # 开发启动脚本
+└── data/
+    └── gather.db                  # SQLite 数据库
+```
+
+---
+
+## API 文档
+
+所有 API 前缀为 `/api/v1`。启动后端后可访问 `http://localhost:8109/docs` 查看交互式 Swagger 文档。
+
+### 核心端点
+
+| 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/collection/sources` | 列出信息源 |
-| POST | `/api/collection/sources` | 注册信息源 |
-| POST | `/api/collection/sources/{id}/validate` | 验证连接 |
-| GET | `/api/collection/topics` | 列出主题 |
-| POST | `/api/collection/topics` | 创建主题 |
-| GET | `/api/collection/schedules` | 列出调度 |
-| POST | `/api/collection/schedules` | 创建调度 |
-| POST | `/api/collection/run` | 手动触发采集 |
-| GET | `/api/collection/items` | 查询采集条目 |
-| GET | `/api/collection/hs-codes` | 查询HS编码 |
-| POST | `/api/collection/hs-codes/search` | HS编码搜索 |
-| POST | `/api/collection/hs-codes/collect` | 触发HS采集 |
-| GET | `/api/collection/connectors` | 列出可用连接器 |
-| GET | `/api/collection/stats` | 统计信息 |
+| GET/POST | `/sources` | 信息源列表/创建 |
+| GET/PUT/DELETE | `/sources/{id}` | 信息源详情/更新/删除 |
+| POST | `/sources/{id}/validate` | 测试信息源连接 |
+| GET/POST | `/topics` | 主题列表/创建 |
+| GET/PUT/DELETE | `/topics/{id}` | 主题详情/更新/删除 |
+| POST | `/topics/{id}/collect` | 触发主题采集 |
+| POST | `/collect` | 通用采集触发 |
+| GET | `/items` | 条目列表 (支持过滤/搜索/分页) |
+| GET | `/items/{id}` | 条目详情 |
+| GET | `/items/ids` | 匹配条目的 ID 列表 |
+| POST | `/items/batch-delete` | 批量删除条目 |
+| GET | `/items/export` | 导出条目 (CSV/JSON/XLSX) |
+| GET | `/runs` | 采集执行记录 |
+| GET | `/runs/batches` | 按批次分组查看 |
+| GET | `/runs/active` | 当前活跃采集任务 |
+| GET | `/tags` | 标签列表 |
+| POST | `/tags/merge` | 标签合并 |
+| GET/POST | `/reports` | 报告列表/生成 |
+| POST | `/reports/batch-generate` | 批量生成报告 |
+| POST | `/reports/{id}/export` | 导出报告文件 |
+| GET/POST | `/models` | AI 模型配置 |
+| POST | `/models/{id}/test` | 测试模型连接 |
+| GET/POST | `/notifications` | 通知配置 |
+| GET | `/stats/dashboard` | 仪表盘一站式统计 |
+| GET | `/settings` | 系统设置 |
 
-### 新增文件
+---
 
-backend/app/
-├── database.py              # SQLAlchemy引擎和会话管理
-├── models.py                # ORM模型: SourceConfig, Topic, ScheduleConfig, CollectedItem, HSCode
-├── collection_schemas.py    # Pydantic schema for management API
-├── collection_routes.py     # REST API 路由
-├── engine.py                # 采集引擎 (编排层)
-├── scheduler.py             # APScheduler 集成
-└── connectors/
-    ├── __init__.py
-    ├── base.py              # BaseCollector + ConnectorRegistry
-    ├── tavily_search.py     # Tavily Web搜索连接器
-    ├── rss_collector.py     # RSS/Atom feed连接器
-    ├── web_scrape.py        # 网页抓取 (BS4) 连接器
-    └── official_api.py      # 官方API连接器 (WTO, EU, 海关, 商务部)
+## 开发指南
+
+### 命令速查
+
+```bash
+# 类型检查
+npm run typecheck
+
+# 生产构建
+npm run build
+
+# 后端测试 (258 个用例)
+cd backend && .venv/bin/python -m pytest tests/ -v
+
+# 单个测试文件
+cd backend && .venv/bin/python -m pytest tests/test_tags.py -v
+
+# 代码格式化 (Python)
+cd backend && .venv/bin/black app/ tests/
+
+# 代码格式化 (前端)
+cd frontend && npx prettier --write src/
+```
+
+### 研发约束
+
+- 函数 ≤ 50 行，文件 ≤ 400 行
+- 嵌套 ≤ 3 层
+- TDD 循环 (RED → GREEN → IMPROVE)
+- 数据不可变：始终创建新对象/数组
+- 提交格式：`<type>: <简述>` (feat/fix/refactor/docs/test/chore/perf/ci)
+
+### 设计系统
+
+- **深色主题**：CSS 变量体系 (`--ink`, `--surface`, `--accent`, `--line` 等)
+- **间距**：4px 步进 (4/8/12/16/24/32/48)
+- **圆角**：`--radius: 8px`
+- **字体**：Inter → SF Pro Display → PingFang SC → system-ui
+- **图标**：Lucide React
+- **图表**：ECharts
+
+---
+
+## 质量指标
+
+| 指标 | 数值 |
+|------|------|
+| 后端测试用例 | 258 个，通过率 100% |
+| TypeScript 类型检查 | 零错误 |
+| 生产构建 | ✓ ~170ms |
+| 后端模块 | 45 文件，~7000 行 |
+| 前端组件 | 25 组件 + 6 共享 + 3 Hooks，~5400 行 |
+| 信息源 | 92 个 (83 已配置 + 9 待 API Key) |
+| API 端点 | 50+ |
+| 覆盖渠道 | 9 种 |
+
+---
+
+## 待配置信息源
+
+以下信息源需要填入 API Key 后方可激活：
+
+| 信息源 | 获取地址 |
+|--------|----------|
+| NewsAPI | https://newsapi.org/register |
+| Tavily Search | https://tavily.com |
+| UN Comtrade | https://comtradeapi.un.org |
+| Trading Economics | https://tradingeconomics.com |
+| Inoreader | https://www.inoreader.com |
+| Feedly | https://feedly.com |
+| 百度搜索 | https://ai.baidu.com |
+| Bing Search | https://azure.microsoft.com |
+| Search1API | https://search1api.com |
+
+---
+
+## License
+
+MIT

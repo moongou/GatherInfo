@@ -36,7 +36,7 @@ class CollectionScheduler:
 
     async def add_schedule(self, schedule: ScheduleConfig) -> str:
         jid = f"sched-{schedule.id}"
-        if jid in self._job_ids:
+        if jid in self._job_ids.values():
             self._scheduler.remove_job(jid)
         trigger = CronTrigger.from_crontab(schedule.cron_expression, schedule.timezone)
         self._scheduler.add_job(
@@ -84,7 +84,7 @@ class CollectionScheduler:
             # Load Topic-based schedules
             for t in db.query(Topic).filter(Topic.is_scheduled == True, Topic.is_active == True).all():
                 jid = f"topic-{t.id}"
-                if jid in self._job_ids:
+                if jid in self._job_ids.values():
                     continue
                 if t.schedule_cron and len(t.schedule_cron.strip().split()) == 5:
                     try:

@@ -1,5 +1,6 @@
+import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap } from "lucide-react";
 import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors } from "../api";
 import type { Source, ConnectorInfo } from "../types";
 
@@ -11,6 +12,8 @@ export function SourcesPage() {
   const [editing, setEditing] = useState<Source | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
+  const [sourceTab, setSourceTab] = useState<"configured" | "standby">("configured");
 
   const load = useCallback(async () => {
     try {
@@ -28,10 +31,16 @@ export function SourcesPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(`删除信息源 "${id}"？这将同时删除其采集的所有条目。`)) return;
+  const handleDelete = (id: string) => {
+    setConfirmDelete({ id, message: `删除信息源 "${id}"？这将同时删除其采集的所有条目。` });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const id = confirmDelete.id;
     try { await deleteSource(id); setSources((p) => p.filter((s) => s.id !== id)); }
     catch (e) { alert(e instanceof Error ? e.message : "删除失败"); }
+    setConfirmDelete(null);
   };
 
   const handleValidate = async (id: string) => {
@@ -68,8 +77,26 @@ export function SourcesPage() {
         </div>
       </div>
 
+      {/* Source classification tabs */}
+      <div className="segmented-control" style={{ marginBottom: 16 }}>
+        <button
+          type="button"
+          className={`seg-btn ${sourceTab === "configured" ? "seg-btn--active" : ""}`}
+          onClick={() => setSourceTab("configured")}
+        >
+          <Zap size={12} /> 已配置可用 ({sources.filter(s => s.is_configured).length})
+        </button>
+        <button
+          type="button"
+          className={`seg-btn ${sourceTab === "standby" ? "seg-btn--active" : ""}`}
+          onClick={() => setSourceTab("standby")}
+        >
+          <Settings size={12} /> 备用未配置 ({sources.filter(s => !s.is_configured).length})
+        </button>
+      </div>
+
       <div className="card-list">
-        {sources.map((s) => (
+        {sources.filter(s => sourceTab === "configured" ? s.is_configured : !s.is_configured).map((s) => (
           <article key={s.id} className="card-item card-item--compact">
             <div className="card-item-header">
               <div className="card-item-title">
@@ -84,9 +111,10 @@ export function SourcesPage() {
                 <span className="text-muted small">{s.id} · {s.channel}</span>
               </div>
               <div className="card-item-actions">
-                <span className={`badge ${s.is_active ? "badge--green" : "badge--gray"}`}>
-                  {s.is_active ? "活跃" : "停用"}
+                <span className={`badge ${s.is_configured ? (s.is_active ? "badge--green" : "badge--gray") : "badge--yellow"}`}>
+                  {s.is_configured ? (s.is_active ? "活跃" : "停用") : "待配置"}
                 </span>
+                {!s.is_configured && s.api_key && <span className="badge badge--blue" style={{ marginLeft: 4 }}>已填Key</span>}
               </div>
             </div>
             <div className="card-item-meta card-item-meta--compact">
@@ -96,9 +124,15 @@ export function SourcesPage() {
               <span className="meta-inline text-muted">采集 {s.items_collected} 条{s.last_error && <span className="text-red"> · 错误: {s.last_error}</span>}</span>
             </div>
             <div className="card-item-footer">
-              <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleValidate(s.id)}>
-                <CheckCircle size={12} /> 验证连接
-              </button>
+              {s.is_configured ? (
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleValidate(s.id)}>
+                  <CheckCircle size={12} /> 验证连接
+                </button>
+              ) : (
+                <button type="button" className="btn btn-sm btn-accent" onClick={() => setEditing(s)}>
+                  <Settings size={12} /> 配置并启用
+                </button>
+              )}
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(s)}>
                 <Edit3 size={12} /> 编辑
               </button>

@@ -1,37 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, ChevronDown } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit } from "lucide-react";
 import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories } from "../api";
+import { ConfirmDialog } from "./shared/ConfirmDialog";
 import type { Topic, CollectResult, ModelConfig, Source } from "../types";
-import { DESCRIPTION_PROMPT_TEMPLATES, KEYWORD_WEIGHT_TEMPLATES } from "../templates";
-import type { PromptTemplate, KeywordTemplate } from "../templates";
+import { TopicForm } from "./TopicForm";
 
 /** Humanize a 5-field cron expression into a Chinese description (best-effort). */
-function recommendTemplates(keywords: string[]): { label: string; value: string; score: number }[] {
-  if (!keywords.length) return [];
-  const allTemplates = [...DESCRIPTION_PROMPT_TEMPLATES, ...KEYWORD_WEIGHT_TEMPLATES];
-  return allTemplates
-    .map((t) => {
-      const label = t.label.toLowerCase();
-      const value = t.value.toLowerCase();
-      let score = 0;
-      for (const kw of keywords) {
-        const k = kw.toLowerCase();
-        if (label.includes(k)) score += 3;
-        if (value.includes(k)) score += 2;
-      }
-      const valueWords = value.split(/[\\s,\u3001]+/);
-      for (const w of valueWords) {
-        for (const kw of keywords) {
-          if (w.includes(kw.toLowerCase()) || kw.toLowerCase().includes(w)) score += 1;
-        }
-      }
-      return { ...t, score };
-    })
-    .filter((t) => t.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-}
-
 function humanizeCron(cron: string | null): string {
   if (!cron) return "未设置";
   const parts = cron.trim().split(/\s+/);
@@ -61,6 +35,7 @@ export function TopicsPage() {
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,14 +60,20 @@ export function TopicsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(`删除主题 "${id}"？`)) return;
+  const handleDelete = (id: string) => {
+    setConfirmDelete({ id, message: `删除主题 "${id}"？` });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const id = confirmDelete.id;
     try {
       await deleteTopic(id);
       setTopics((prev) => prev.filter((t) => t.id !== id));
     } catch (e) {
       alert(e instanceof Error ? e.message : "删除失败");
     }
+    setConfirmDelete(null);
   };
 
   const handleCollect = async (id: string) => {
@@ -269,244 +250,3 @@ export function TopicsPage() {
 
 // ── Topic form ───────────────────────────────────────────────────────────────
 
-type TopicFormProps = {
-  topic: Topic | null;   // null = create mode
-  sources: Source[];
-  models: ModelConfig[];
-  categories: {id:string;name:string}[];
-  onSave: (data: Partial<Topic>) => Promise<void>;
-  onClose: () => void;
-};
-
-function TopicForm({ topic, sources, models, categories, onSave, onClose }: TopicFormProps) {
-  const [saving, setSaving] = useState(false);
-  const [name, setName] = useState(topic?.name ?? "");
-  const [desc, setDesc] = useState(topic?.description ?? "");
-  const [categoryId, setCategoryId] = useState(topic?.category_id ?? "");
-  const [keywords, setKeywords] = useState((topic?.keywords ?? []).join(", "));
-  const [keywordTags, setKeywordTags] = useState(
-    ((topic as any)?.keyword_tags ?? []).map((kt: any) => `${kt.keyword}:${kt.weight}`).join("\n")
-  );
-  const [descriptionPrompt, setDescriptionPrompt] = useState((topic as any)?.description_prompt ?? "");
-  const [collectWindowDays, setCollectWindowDays] = useState<number>((topic as any)?.collect_window_days ?? 7);
-  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>(topic?.source_ids ?? []);
-  const [targetUrls, setTargetUrls] = useState((topic?.target_urls ?? []).join("\n"));
-  const [cron, setCron] = useState(topic?.schedule_cron ?? "");
-  const [autoReport, setAutoReport] = useState(topic?.auto_report ?? false);
-  const [autoReportModelId, setAutoReportModelId] = useState(
-    topic?.auto_report_model_id ?? models.find((m) => m.is_default)?.id ?? ""
-  );
-  const [autoTags, setAutoTags] = useState(
-    (topic?.auto_tag_rules ?? []).map((r) => `${r.keyword}:${r.tag}`).join(", ")
-  );
-
-  const toggleSource = (sid: string) => {
-    setSelectedSourceIds((prev) =>
-      prev.includes(sid) ? prev.filter((s) => s !== sid) : [...prev, sid]
-    );
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await onSave({
-        name,
-        category_id: categoryId || null,
-        description: desc || null,
-        keywords: keywords.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
-        keyword_tags: keywordTags ? keywordTags.split(/\r?\n/).map((s: string) => {
-          const [kw, w] = s.split(/[:：]/);
-          return { keyword: kw?.trim() || "", weight: parseFloat(w?.trim() || "1") || 1 };
-        }).filter((r: { keyword: string; weight: number }) => r.keyword) : null,
-        description_prompt: descriptionPrompt || null,
-        source_ids: selectedSourceIds.length ? selectedSourceIds : null,
-        collect_window_days: Number.isFinite(collectWindowDays) ? collectWindowDays : 7,
-        target_urls: targetUrls ? targetUrls.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : null,
-        schedule_cron: cron || null,
-        is_scheduled: !!cron,
-        auto_report: autoReport,
-        auto_report_model_id: autoReport ? (autoReportModelId || null) : null,
-        auto_tag_rules: autoTags ? autoTags.split(/[,，]/).map((s) => {
-          const [kw, tag] = s.trim().split(/[:：]/);
-          return { keyword: kw?.trim() ?? "", tag: tag?.trim() ?? "" };
-        }).filter((r) => r.keyword && r.tag) : null,
-      });
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "保存失败");
-    }
-    setSaving(false);
-  };
-
-  const activeSources = sources.filter((s) => s.is_active);
-  const allSelected = activeSources.length > 0 && activeSources.every((s) => selectedSourceIds.includes(s.id));
-  const toggleSelectAll = () => {
-    setSelectedSourceIds(allSelected ? [] : activeSources.map((s) => s.id));
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{topic ? "编辑主题" : "新建主题"}</h3>
-        <div className="form-grid">
-          {topic && (
-            <label>ID <span className="chip">{topic.id}</span></label>
-          )}
-          <label>名称 <input value={name} onChange={(e) => setName(e.target.value)} placeholder="我的采集主题" /></label>
-          <label className="span-2">描述 <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="简要描述..." /></label>
-          <label className="span-2">采集类别
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">(无类别)</option>
-              {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
-            </select>
-          </label>
-          <label className="span-2">关键词 (逗号分隔) <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="贸易政策, 关税, RCEP" /></label>
-
-          <label className="span-2">绑定信息源 (不选=所有活跃信息源)
-            <MultiSelect
-              options={activeSources.map((s) => ({ value: s.id, label: s.name }))}
-              selected={selectedSourceIds}
-              onChange={setSelectedSourceIds}
-              placeholder={selectedSourceIds.length === 0 ? "全部活跃信息源" : `已选 ${selectedSourceIds.length} 个`}
-            />
-          </label>
-
-          <label>Cron表达式 <input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 8 * * * (每日8点)" /></label>
-
-          <label>采集时间范围 (天数)
-            <input type="number" min={0} value={collectWindowDays}
-              onChange={(e) => setCollectWindowDays(parseInt(e.target.value, 10) || 0)}
-              placeholder="7" />
-            <span className="text-muted small">只采集发布时间在该天数内的信息，0=不限制</span>
-          </label>
-
-          <label className="span-2">自动报告
-            <div className="checkbox-item">
-              <input type="checkbox" checked={autoReport} onChange={(e) => setAutoReport(e.target.checked)} />
-              {" "}采集完成后自动生成报告
-            </div>
-            {autoReport && (
-              <select value={autoReportModelId} onChange={(e) => setAutoReportModelId(e.target.value)}>
-                <option value="">(使用默认模型)</option>
-                {models.filter((m) => m.is_active).map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}{m.is_default ? " ★" : ""}</option>
-                ))}
-              </select>
-            )}
-          </label>
-
-                    <label className="span-2">加权关键词 (每行一个, keyword:权重)
-            <div className="template-row">
-              <select className="template-select" value="" onChange={(e) => {
-                const tpl = KEYWORD_WEIGHT_TEMPLATES.find((t) => t.label === e.target.value);
-                if (tpl) setKeywordTags((prev: string) => (prev.trim() ? prev.trimEnd() + "\n" + tpl.value : tpl.value));
-              }}>
-                <option value="">插入模板...</option>
-                {KEYWORD_WEIGHT_TEMPLATES.map((t) => {
-                      const kwList = keywords.split(/[,\u3001\s]+/).filter(Boolean);
-                      const recs = recommendTemplates(kwList);
-                      const recLabels = new Set(recs.map((r) => r.label));
-                      return (
-                        <option key={t.label} value={t.label}>
-                          {recLabels.has(t.label) ? "\u2605 " + t.label : t.label}
-                        </option>
-                      );
-                    })}
-              </select>
-            </div>
-            <textarea rows={3} value={keywordTags} onChange={(e) => setKeywordTags(e.target.value)}
-              placeholder="关税:1.0&#10;贸易壁垒:0.8&#10;供应链:0.6" />
-            <span className="text-muted small">权重范围 0.1~1.0，越高表示关键词越重要</span>
-          </label>
-
-          <label className="span-2">描述提示词
-            <div className="template-row">
-              <select className="template-select" value="" onChange={(e) => {
-                const tpl = DESCRIPTION_PROMPT_TEMPLATES.find((t) => t.label === e.target.value);
-                if (tpl) setDescriptionPrompt(tpl.value);
-              }}>
-                <option value="">选择模板...</option>
-                {DESCRIPTION_PROMPT_TEMPLATES.map((t) => {
-                      const kwList = keywords.split(/[,\u3001\s]+/).filter(Boolean);
-                      const recs = recommendTemplates(kwList);
-                      const recLabels = new Set(recs.map((r) => r.label));
-                      return (
-                        <option key={t.label} value={t.label}>
-                          {recLabels.has(t.label) ? "\u2605 " + t.label : t.label}
-                        </option>
-                      );
-                    })}
-              </select>
-            </div>
-            <textarea rows={3} value={descriptionPrompt} onChange={(e) => setDescriptionPrompt(e.target.value)}
-              placeholder="例如：监控全球主要经济体的贸易政策变化、关税调整、贸易协定进展，重点关注影响中国出口的措施" />
-            <span className="text-muted small">用自然语言描述这个主题的关注重点和需求，AI 报告生成时会参考此描述</span>
-          </label>
-<label className="span-2">目标URL (每行一个) <textarea rows={2} value={targetUrls} onChange={(e) => setTargetUrls(e.target.value)} placeholder="https://example.com/page&#10;https://example.com/other" /></label>
-          <label className="span-2">自动标签 (keyword:tag, 逗号分隔) <input value={autoTags} onChange={(e) => setAutoTags(e.target.value)} placeholder="关税:event:tariff, 电池:product:battery" /></label>
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
-          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || !name}>
-            {saving ? "保存中..." : "保存"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Multi-select dropdown component ─────────────────────────────────────────
-
-function MultiSelect({ options, selected, onChange, placeholder }: {
-  options: { value: string; label: string }[];
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  placeholder: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const allSelected = options.length > 0 && options.every((o) => selected.includes(o.value));
-  const toggleAll = () => {
-    onChange(allSelected ? [] : options.map((o) => o.value));
-  };
-  const toggle = (value: string) => {
-    onChange(selected.includes(value) ? selected.filter((s) => s !== value) : [...selected, value]);
-  };
-
-  return (
-    <div className="multi-select-wrapper" ref={ref}>
-      <button type="button" className="multi-select-trigger" onClick={() => setOpen(!open)}>
-        <span className={selected.length === 0 ? "placeholder" : ""}>{placeholder}</span>
-        <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "", transition: "transform 0.15s" }} />
-      </button>
-      {open && (
-        <div className="multi-select-dropdown">
-          {options.length > 0 && (
-            <label className="multi-select-option multi-select-all">
-              <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-              <strong>{allSelected ? "取消全选" : "全选"}</strong>
-            </label>
-          )}
-          {options.map((o) => (
-            <label key={o.value} className="multi-select-option">
-              <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
-              {o.label}
-            </label>
-          ))}
-          {options.length === 0 && <div className="multi-select-option" style={{ color: "var(--ink-muted)", cursor: "default" }}>暂无活跃信息源</div>}
-        </div>
-      )}
-    </div>
-  );
-}

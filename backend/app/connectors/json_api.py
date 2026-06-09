@@ -5,36 +5,9 @@ A single configurable connector that can talk to most JSON HTTP APIs
 (NewsAPI, UN Comtrade, World Bank, Trading Economics, etc.) so the user
 only configures things in ONE place (this project), per source.
 
-All behaviour is driven by SourceConfig fields:
-  - base_url / api_endpoint : request URL (endpoint joined onto base_url)
-  - api_key                 : credential (placed per `auth_config.auth`)
-  - auth_config             : a small mapping describing how to call + parse
-
-auth_config schema (all keys optional, sensible defaults):
-  {
-    "method": "GET" | "POST",            # default GET
-    "auth": "query" | "header" | "bearer" | "none",   # where to put api_key
-    "auth_param": "apiKey",              # query/header name for the key
-    "query": {"language": "en"},         # extra static query params
-    "keyword_param": "q",                # query param that receives keywords
-    "keyword_join": " OR ",              # how to join multiple keywords
-    "body": {...},                       # static JSON body for POST
-    "items_path": "articles",            # dot-path to the list of records
-                                         # (supports nested: "data.results")
-    "fields": {                          # record field -> source key (dot-path)
-      "title": "title",
-      "content": "content",
-      "summary": "description",
-      "url": "url",
-      "published_at": "publishedAt",
-      "language": "language",
-      "category": "category"
-    }
-  }
-
-This keeps every commercial/official JSON API configurable from the single
-source-config UI rather than requiring per-platform code.
+All behaviour is driven by SourceConfig fields.
 """
+import logging
 import asyncio
 from urllib.parse import urljoin
 
@@ -44,6 +17,8 @@ from app.connectors.base import (
     BaseCollector, CollectResult, FetchItem,
     JobStatus, SourceConfig, register_collector,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @register_collector("json_api")
@@ -72,6 +47,7 @@ class JsonApiCollector(BaseCollector):
 
         ac = self.config.auth_config or {}
         if ac.get("auth", "none") != "none" and not self.config.api_key:
+            logger.warning("api_key not configured for JSON API source %s", self.config.id)
             return self._error("api_key not configured for this source")
 
         method = (ac.get("method") or "GET").upper()
@@ -90,18 +66,21 @@ class JsonApiCollector(BaseCollector):
                 else:
                     resp = await client.get(url, params=params, headers=headers)
                 if resp.status_code == 429:
+                    logger.warning("JSON API rate limited for source %s", self.config.id)
                     return self._error("Rate limited (HTTP 429)")
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as exc:
+            logger.error("JSON API HTTP error for source %s: %s", self.config.id, exc)
             return self._error(f"HTTP/JSON error: {exc}")
 
         records = _dig(data, ac.get("items_path", ""))
         if records is None:
-            # Fall back: if the payload itself is a list, use it
             records = data if isinstance(data, list) else []
         if not isinstance(records, list):
-            return self._error(f"items_path did not resolve to a list: {ac.get('items_path')}")
+            msg = f"items_path did not resolve to a list: {ac.get('items_path')}"
+            logger.warning("JSON API parse issue for source %s: %s", self.config.id, msg)
+            return self._error(msg)
 
         fields = ac.get("fields") or {
             "title": "title", "content": "content", "summary": "description",
@@ -121,18 +100,20 @@ class JsonApiCollector(BaseCollector):
                 content=content or summary or None,
                 url=_coerce_str(_dig(rec, fields.get("url", "url"))) or None,
                 summary=(summary or content or "")[:500] or None,
-                published_at=_coerce_str(_dig(rec, fields.get("published_at", "publishedAt"))) or None,
-                language=_coerce_str(_dig(rec, fields.get("language", "language"))) or None,
-                category=_coerce_str(_dig(rec, fields.get("category", "category"))) or None,
+                published_at=_coerce_str(
+                    _dig(rec, fields.get("published_at", "publishedAt"))) or None,
+                language=_coerce_str(
+                    _dig(rec, fields.get("language", "language"))) or None,
+                category=_coerce_str(
+                    _dig(rec, fields.get("category", "category"))) or None,
                 raw_metadata={"connector": "json_api", "source": self.config.id},
             ))
 
+        logger.info("JSON API: %d items for source %s", len(items), self.config.id)
         return CollectResult(
             run_id=self._new_run_id(), source_id=self.config.id,
             status=JobStatus.COMPLETED, items=items, items_new=len(items),
         )
-
-    # ── internals ────────────────────────────────────────────────────────────
 
     def _request_url(self) -> str:
         base = (self.config.base_url or "").strip()
@@ -140,7 +121,8 @@ class JsonApiCollector(BaseCollector):
         if endpoint.startswith("http"):
             return endpoint
         if base and endpoint:
-            return urljoin(base if base.endswith("/") else base + "/", endpoint.lstrip("/"))
+            return urljoin(base if base.endswith("/") else base + "/",
+                           endpoint.lstrip("/"))
         return base or endpoint
 
     def _build_request(self, queries: list[str]) -> tuple[dict, dict, dict]:
@@ -150,18 +132,17 @@ class JsonApiCollector(BaseCollector):
                          "User-Agent": "GatherInfo/0.4 (Customs Intel Monitor)"}
         body: dict = dict(ac.get("body") or {})
 
-        # Keyword injection
         kw = [q for q in queries if q]
         if kw:
             joined = (ac.get("keyword_join") or " OR ").join(kw)
             kp = ac.get("keyword_param")
             if kp:
-                if (ac.get("method") or "GET").upper() == "POST" and ac.get("keyword_in") == "body":
+                if (ac.get("method") or "GET").upper() == "POST" and ac.get(
+                        "keyword_in") == "body":
                     body[kp] = joined
                 else:
                     params[kp] = joined
 
-        # Auth placement
         auth = ac.get("auth", "none")
         key = self.config.api_key or ""
         if auth == "query" and key:
@@ -180,10 +161,7 @@ class JsonApiCollector(BaseCollector):
         )
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
 def _dig(obj, path: str):
-    """Resolve a dot-path (e.g. 'data.results') against nested dicts/lists."""
     if path is None or path == "":
         return obj
     cur = obj
@@ -210,7 +188,6 @@ def _coerce_str(val) -> str:
     if isinstance(val, (int, float, bool)):
         return str(val)
     if isinstance(val, dict):
-        # common nested shapes: {"name": ...} or {"value": ...}
         for k in ("name", "value", "text", "title"):
             if k in val:
                 return _coerce_str(val[k])

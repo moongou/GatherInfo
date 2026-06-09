@@ -5,6 +5,7 @@ export interface Source {
   description: string | null;
   channel: string;
   is_active: boolean;
+  is_configured: boolean;
   base_url: string | null;
   api_endpoint: string | null;
   homepage_url: string | null;
@@ -42,6 +43,7 @@ export interface Topic {
   schedule_cron: string | null;
   is_scheduled: boolean;
   is_active: boolean;
+  is_configured: boolean;
   auto_report: boolean;
   auto_report_model_id: string | null;
   last_collection_run_id: string | null;
@@ -119,6 +121,7 @@ export interface Schedule {
   topic_ids: string[] | null;
   cron_expression: string;
   is_active: boolean;
+  is_configured: boolean;
   last_run_at: string | null;
   next_run_at: string | null;
   run_count: number;
@@ -213,6 +216,7 @@ export interface ModelConfig {
   top_p: number;
   is_default: boolean;
   is_active: boolean;
+  is_configured: boolean;
   description: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -230,6 +234,7 @@ export interface ModelTestResult {
 export interface Report {
   id: string;
   topic_id: string;
+  topic_name?: string;
   title: string;
   content: string | null;
   summary: string | null;
@@ -290,6 +295,7 @@ export interface SearchToolConfig {
   name: string;
   tool_type: string;
   is_active: boolean;
+  is_configured: boolean;
   config_json: Record<string, unknown> | null;
   api_key_ref: string | null;
   is_default: boolean;
@@ -352,4 +358,21 @@ export interface ActiveRunOut {
   started_at: string | null;
   duration_seconds: number | null;
   batch_id: string | null;
+}
+
+// ── Notifications ───────────────────────────────────────────────────────
+
+export interface NotificationConfig {
+  id: string;
+  name: string;
+  channel: string;
+  webhook_url: string | null;
+  email_to: string | null;
+  trigger_on_new: boolean;
+  trigger_on_failure: boolean;
+  is_active: boolean;
+  is_configured: boolean;
+  last_sent_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }

@@ -1,6 +1,7 @@
 """
 Official API connector — WTO ePing, EUR-Lex, China Customs, UN Comtrade.
 """
+import logging
 import os
 import asyncio
 from urllib.parse import urljoin
@@ -11,6 +12,9 @@ from app.connectors.base import (
     BaseCollector, CollectResult, FetchItem,
     JobStatus, SourceConfig, register_collector,
 )
+from app.connectors._helpers import result
+
+logger = logging.getLogger(__name__)
 
 
 @register_collector("official")
@@ -29,7 +33,10 @@ class OfficialAPICollector(BaseCollector):
             "un_comtrade": self._fetch_un_comtrade,
             "generic": self._fetch_generic,
         }
-        return await handlers.get(atype, self._fetch_generic)(keywords, max_items)
+        res = await handlers.get(atype, self._fetch_generic)(keywords, max_items)
+        logger.info("OfficialAPI(%s): %d items, %d errors for source %s",
+                     atype, len(res.items), len(res.error_log or []), self.config.id)
+        return res
 
     # ── WTO ePing ────────────────────────────────────────────────────────
 
@@ -59,8 +66,9 @@ class OfficialAPICollector(BaseCollector):
                     ))
             except Exception as exc:
                 errors.append(str(exc))
+                logger.error("WTO ePing fetch error for source %s: %s", self.config.id, exc)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
     # ── EUR-Lex ──────────────────────────────────────────────────────────
 
@@ -74,11 +82,13 @@ class OfficialAPICollector(BaseCollector):
                     "https://eur-lex.europa.eu/search.html",
                     params={
                         "type": "advanced", "DTS_SUBDOM": "LEGISLATION",
-                        "q": " ".join(keywords), "pageSize": min(max_items, 20), "lang": "en",
+                        "q": " ".join(keywords), "pageSize": min(max_items, 20),
+                        "lang": "en",
                     },
                     headers={"Accept": "application/json"},
                 )
-                if resp.status_code == 200 and "application/json" in resp.headers.get("Content-Type", ""):
+                if resp.status_code == 200 and "application/json" in resp.headers.get(
+                        "Content-Type", ""):
                     for doc in resp.json().get("documents", resp.json().get("results", [])):
                         if isinstance(doc, dict):
                             items.append(FetchItem(
@@ -92,66 +102,73 @@ class OfficialAPICollector(BaseCollector):
                             ))
             except Exception as exc:
                 errors.append(str(exc))
+                logger.error("EUR-Lex fetch error for source %s: %s", self.config.id, exc)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
     # ── China Customs ────────────────────────────────────────────────────
 
     async def _fetch_cn_customs(self, keywords: list[str], max_items: int) -> CollectResult:
         items: list[FetchItem] = []
         errors: list[str] = []
-        ac = self.config.auth_config or {}
 
         urls = [
             "http://www.customs.gov.cn/customs/302249/302266/index.html",
-            "http://www.customs.gov.cn/customs/302249/zfxxgk/zfxxgkml34/index.html",
+            "http://www.customs.gov.cn/customs/302249/zfxxgk/zfxxgkml/index.html",
         ]
 
         async with httpx.AsyncClient(
             timeout=self.config.timeout_seconds,
-            headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "zh-CN,zh;q=0.9"},
+            headers={"User-Agent": "GatherInfo/0.4"},
+            follow_redirects=True,
         ) as client:
             for url in urls:
+                if len(items) >= max_items:
+                    break
                 try:
                     resp = await client.get(url)
                     resp.raise_for_status()
                     from bs4 import BeautifulSoup
                     soup = BeautifulSoup(resp.text, "lxml")
-                    sel = ac.get("item_selector", "a[href]")
-                    for link in soup.select(sel)[:max_items]:
+                    for link in soup.select("a[href]")[:max_items]:
                         text = link.get_text(strip=True)
                         href = link.get("href", "")
-                        if len(text) < 6:
+                        if len(text) < 8:
                             continue
-                        full_url = urljoin(url, href) if href else ""
                         items.append(FetchItem(
-                            title=text, url=full_url, content=text,
-                            language="zh", category="regulation",
+                            title=text, url=urljoin(url, href) if href else "",
+                            content=text, language="zh", category="policy",
                             suggested_tags=["source:cn_customs", "country:cn"],
                             quality_score=0.8,
                             raw_metadata={"source": "cn_customs"},
                         ))
                 except Exception as exc:
                     errors.append(f"cn_customs: {str(exc)[:80]}")
+                    logger.error("China Customs fetch error for source %s: %s",
+                                 self.config.id, exc)
                 await asyncio.sleep(0.5)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
-    # ── China MOFCOM ─────────────────────────────────────────────────────
+    # ── MOFCOM ───────────────────────────────────────────────────────────
 
     async def _fetch_cn_mofcom(self, keywords: list[str], max_items: int) -> CollectResult:
         items: list[FetchItem] = []
         errors: list[str] = []
 
         urls = [
-            "http://www.mofcom.gov.cn/article/zwgk/bnjg/",
+            "http://www.mofcom.gov.cn/article/b/",
+            "http://www.mofcom.gov.cn/article/ae/",
         ]
 
         async with httpx.AsyncClient(
             timeout=self.config.timeout_seconds,
-            headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "zh-CN,zh;q=0.9"},
+            headers={"User-Agent": "GatherInfo/0.4"},
+            follow_redirects=True,
         ) as client:
             for url in urls:
+                if len(items) >= max_items:
+                    break
                 try:
                     resp = await client.get(url)
                     resp.raise_for_status()
@@ -171,16 +188,19 @@ class OfficialAPICollector(BaseCollector):
                         ))
                 except Exception as exc:
                     errors.append(f"cn_mofcom: {str(exc)[:80]}")
+                    logger.error("MOFCOM fetch error for source %s: %s", self.config.id, exc)
                 await asyncio.sleep(0.5)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
     # ── UN Comtrade ──────────────────────────────────────────────────────
 
     async def _fetch_un_comtrade(self, keywords: list[str], max_items: int) -> CollectResult:
         apikey = os.getenv("COMTRADE_API_KEY", "")
         if not apikey:
-            return _result(self._new_run_id(), self.config.id, [], ["COMTRADE_API_KEY not set"])
+            logger.warning("COMTRADE_API_KEY not set for source %s", self.config.id)
+            return result(self._new_run_id(), self.config.id, [],
+                          ["COMTRADE_API_KEY not set"])
 
         items: list[FetchItem] = []
         errors: list[str] = []
@@ -203,14 +223,17 @@ class OfficialAPICollector(BaseCollector):
                     ))
             except Exception as exc:
                 errors.append(str(exc))
+                logger.error("UN Comtrade fetch error for source %s: %s",
+                             self.config.id, exc)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
     # ── Generic REST ─────────────────────────────────────────────────────
 
     async def _fetch_generic(self, keywords: list[str], max_items: int) -> CollectResult:
         if not self.config.api_endpoint:
-            return _result(self._new_run_id(), self.config.id, [], ["api_endpoint not configured"])
+            return result(self._new_run_id(), self.config.id, [],
+                          ["api_endpoint not configured"])
 
         items: list[FetchItem] = []
         errors: list[str] = []
@@ -229,7 +252,8 @@ class OfficialAPICollector(BaseCollector):
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                results = data if isinstance(data, list) else data.get("results", data.get("data", []))
+                results = data if isinstance(data, list) else data.get(
+                    "results", data.get("data", []))
                 for r in results[:max_items]:
                     if isinstance(r, dict):
                         items.append(FetchItem(
@@ -240,18 +264,7 @@ class OfficialAPICollector(BaseCollector):
                         ))
             except Exception as exc:
                 errors.append(str(exc))
+                logger.error("Official generic fetch error for source %s: %s",
+                             self.config.id, exc)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
-
-
-def _result(run_id: str, source_id: str, items: list[FetchItem], errors: list[str]) -> CollectResult:
-    status = JobStatus.COMPLETED
-    if not items and errors:
-        status = JobStatus.FAILED
-    elif errors:
-        status = JobStatus.PARTIAL
-    return CollectResult(
-        run_id=run_id, source_id=source_id, status=status,
-        items=items, items_new=len(items), items_failed=len(errors),
-        error_log=errors if errors else None,
-    )
+        return result(self._new_run_id(), self.config.id, items, errors)

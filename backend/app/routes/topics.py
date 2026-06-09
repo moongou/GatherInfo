@@ -1,0 +1,179 @@
+"""Topics CRUD, Categories CRUD, Collection execution."""
+import asyncio
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.collection_schemas import (
+    CategoryCreate, CategoryOut, CategoryUpdate,
+    CollectRequest, CollectResultOut,
+    RunOut, TopicCreate, TopicOut, TopicUpdate,
+)
+from app.database import get_db
+from app.engine import CollectionEngine
+from app.models import Category, CollectionRun, Topic
+
+from ._helpers import _gen_id, _normalize_topic_payload, _topic_out
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/v1", tags=["topics"])
+
+
+# ── Topics ──────────────────────────────────────────────────────────────
+
+@router.get("/topics", response_model=list[TopicOut])
+def list_topics(is_active: bool | None = None, db: Session = Depends(get_db)):
+    q = db.query(Topic)
+    if is_active is not None:
+        q = q.filter(Topic.is_active == is_active)
+    return [_topic_out(db, t) for t in q.all()]
+
+
+@router.post("/topics", response_model=TopicOut, status_code=201)
+def create_topic(data: TopicCreate, db: Session = Depends(get_db)):
+    payload = _normalize_topic_payload(data.model_dump())
+    topic_id = payload.get("id")
+    if not topic_id:
+        topic_id = _gen_id(
+            data.name,
+            exists_fn=lambda c: db.query(Topic).filter(Topic.id == c).first() is not None,
+        )
+    elif db.query(Topic).filter(Topic.id == topic_id).first():
+        raise HTTPException(400, f"主题 '{topic_id}' 已存在")
+    payload["id"] = topic_id
+    try:
+        t = Topic(**payload)
+        db.add(t)
+        db.commit()
+        db.refresh(t)
+    except Exception as exc:
+        db.rollback()
+        logger.error("create_topic failed: %s", exc)
+        raise HTTPException(500, f"创建主题失败: {exc}")
+    return _topic_out(db, t)
+
+
+@router.get("/topics/{topic_id}", response_model=TopicOut)
+def get_topic(topic_id: str, db: Session = Depends(get_db)):
+    t = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not t:
+        raise HTTPException(404)
+    return _topic_out(db, t)
+
+
+@router.put("/topics/{topic_id}", response_model=TopicOut)
+def update_topic(topic_id: str, data: TopicUpdate, db: Session = Depends(get_db)):
+    t = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not t:
+        raise HTTPException(404)
+    try:
+        for k, v in _normalize_topic_payload(data.model_dump(exclude_unset=True)).items():
+            setattr(t, k, v)
+        db.commit()
+        db.refresh(t)
+    except Exception as exc:
+        db.rollback()
+        logger.error("update_topic failed: %s", exc)
+        raise HTTPException(500, f"更新主题失败: {exc}")
+    return _topic_out(db, t)
+
+
+@router.delete("/topics/{topic_id}")
+def delete_topic(topic_id: str, db: Session = Depends(get_db)):
+    t = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not t:
+        raise HTTPException(404)
+    db.delete(t)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Categories ──────────────────────────────────────────────────────────
+
+@router.get("/categories", response_model=list[CategoryOut])
+def list_categories(db: Session = Depends(get_db)):
+    return db.query(Category).order_by(Category.created_at).all()
+
+
+@router.post("/categories", response_model=CategoryOut, status_code=201)
+def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
+    if db.query(Category).filter(Category.id == data.id).first():
+        raise HTTPException(400, f"Category '{data.id}' exists")
+    cat = Category(**data.model_dump())
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+@router.put("/categories/{category_id}", response_model=CategoryOut)
+def update_category(category_id: str, data: CategoryUpdate, db: Session = Depends(get_db)):
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat:
+        raise HTTPException(404)
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(cat, k, v)
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+@router.delete("/categories/{category_id}")
+def delete_category(category_id: str, db: Session = Depends(get_db)):
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat:
+        raise HTTPException(404)
+    db.query(Topic).filter(Topic.category_id == category_id).update({"category_id": None})
+    db.delete(cat)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Collection ──────────────────────────────────────────────────────────
+
+@router.post("/collect", response_model=list[CollectResultOut])
+async def run_collection(data: CollectRequest, db: Session = Depends(get_db)):
+    engine = CollectionEngine(db)
+
+    if data.topic_id:
+        try:
+            results = await engine.collect_topic(data.topic_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        try:
+            topic = db.query(Topic).filter(Topic.id == data.topic_id).first()
+            if topic and topic.auto_report:
+                from app.report_engine import generate_report as auto_gen
+                logger.info("Auto-report triggered for topic %s after manual collection", data.topic_id)
+                asyncio.ensure_future(auto_gen(
+                    topic_id=data.topic_id,
+                    model_id=topic.auto_report_model_id,
+                    collection_run_id=topic.last_collection_run_id,
+                ))
+        except Exception as exc:
+            logger.warning("Auto-report trigger failed for %s: %s", data.topic_id, exc)
+    elif data.source_id:
+        keywords = data.keywords or []
+        r = await engine.collect_from_source(data.source_id, keywords)
+        results = [r]
+    else:
+        raise HTTPException(400, "Specify topic_id or source_id")
+
+    return _build_collect_results(results, db)
+
+
+def _build_collect_results(results, db: Session) -> list[CollectResultOut]:
+    out = []
+    for r in results:
+        run = db.query(CollectionRun).filter(CollectionRun.id == r.run_id).first()
+        out.append(CollectResultOut(
+            run=RunOut.model_validate(run) if run else RunOut(
+                id=r.run_id, source_id=r.source_id, status=r.status or "unknown",
+                items_found=len(r.items), items_new=r.items_new, items_failed=r.items_failed,
+                error_log=r.error_log,
+            ),
+            total_items=len(r.items), items_new=r.items_new,
+            errors=r.error_log,
+        ))
+    return out

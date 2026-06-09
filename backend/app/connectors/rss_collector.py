@@ -1,6 +1,7 @@
 """
 RSS connector for GatherInfo.
 """
+import logging
 import hashlib
 import xml.etree.ElementTree as ET
 from datetime import timezone
@@ -12,6 +13,8 @@ from app.connectors.base import (
     BaseCollector, CollectResult, FetchItem,
     JobStatus, SourceConfig, register_collector,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @register_collector("rss")
@@ -34,15 +37,19 @@ class RSSCollector(BaseCollector):
                 resp.raise_for_status()
                 raw = resp.text
             except Exception as exc:
+                logger.error("RSS HTTP error for source %s: %s", self.config.id, exc)
                 return self._error(f"HTTP error: {exc}")
 
         try:
             root = ET.fromstring(raw)
         except Exception as exc:
+            logger.error("RSS XML parse error for source %s: %s", self.config.id, exc)
             return self._error(f"XML parse error: {exc}")
 
         feed_items = _parse_feed(root)
         filtered = _filter_by_keywords(feed_items, keywords)
+        logger.info("RSS: %d items from feed, %d after filter for source %s",
+                     len(feed_items), len(filtered), self.config.id)
         return CollectResult(
             run_id=self._new_run_id(), source_id=self.config.id,
             status=JobStatus.COMPLETED, items=filtered[:max_items],
@@ -95,7 +102,8 @@ def _parse_feed(root: ET.Element) -> list[FetchItem]:
         published = None
         if pub:
             try:
-                published = parsedate_to_datetime(pub).replace(tzinfo=timezone.utc).isoformat()
+                published = parsedate_to_datetime(pub).replace(
+                    tzinfo=timezone.utc).isoformat()
             except Exception:
                 pass
         if title:

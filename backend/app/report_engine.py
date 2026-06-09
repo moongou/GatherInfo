@@ -9,7 +9,7 @@ Supports:
     - OpenAI-compatible APIs
     - LM Studio local inference
 """
-
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -24,8 +24,8 @@ from app.models import CollectedItem, Topic, ModelConfig, Report
 
 logger = logging.getLogger(__name__)
 
-
-import asyncio
+# Re-export LLM client functions for backward compatibility
+from app.llm_client import call_llm as _call_llm, auto_summary as _auto_summary, translate_item_context as _translate_item_context  # noqa: E501
 
 
 async def generate_report(
@@ -38,21 +38,13 @@ async def generate_report(
     date_to: str | None = None,
     model_name_override: str | None = None,
 ) -> Report:
-    """
-    Main entry point: generate a report for a topic using the specified (or default) model.
-
-    Scope:
-        - collection_run_id: only include items from that specific collection run
-        - date_from / date_to (ISO strings): restrict items by published/collected window
-        - otherwise: all items for the topic
-    """
+    """Main entry point: generate a report for a topic using the specified model."""
     db = SessionLocal()
     try:
         topic = db.query(Topic).filter(Topic.id == topic_id).first()
         if not topic:
             raise ValueError(f"Topic not found: {topic_id}")
 
-        # Resolve model
         model = None
         if model_id:
             model = db.query(ModelConfig).filter(
@@ -65,13 +57,11 @@ async def generate_report(
                 ModelConfig.is_default == True, ModelConfig.is_active == True
             ).first()
             if not model:
-                raise ValueError("No default active model configured. Add a model in 模型配置 first.")
+                raise ValueError("No default active model configured.")
 
-        # Parse optional date window
         dt_from = _parse_iso(date_from)
         dt_to = _parse_iso(date_to)
 
-        # Fetch items for this topic (optionally scoped)
         q = db.query(CollectedItem).filter(CollectedItem.topic_id == topic_id)
         if collection_run_ids:
             q = q.filter(CollectedItem.run_id.in_(collection_run_ids))
@@ -85,36 +75,29 @@ async def generate_report(
         if not items:
             raise ValueError(f"No collected items found for topic '{topic.name}'")
 
-        # Derive the actual data time range from items
         collected_times = [it.collected_at for it in items if it.collected_at]
         range_start = dt_from or (min(collected_times) if collected_times else None)
         range_end = dt_to or (max(collected_times) if collected_times else None)
 
-        # Build context
         item_context = _build_item_context(items)
 
-        # Translate non-Chinese items to Chinese for better report quality
+        # Translate non-Chinese items to Chinese
         if model and item_context:
             try:
-                non_zh = [it for it in item_context if it.get('language', '') not in ('zh', 'zh-CN', 'cn')]
+                non_zh = [
+                    it for it in item_context
+                    if it.get('language', '') not in ('zh', 'zh-CN', 'cn')
+                ]
                 if non_zh and len(non_zh) <= 50:
-                    logger.info("Translating %d non-Chinese items for report %s", len(non_zh), report.id)
-                    translated = await _translate_items(model, non_zh, topic)
-                    if translated:
-                        for t in translated:
-                            for orig in item_context:
-                                if orig.get('id') == t.get('id'):
-                                    orig['title'] = t.get('title', orig['title'])
-                                    if t.get('summary'):
-                                        orig['summary'] = t.get('summary', orig['summary'])
-                                    if t.get('content'):
-                                        orig['content'] = t.get('content', orig['content'])
+                    logger.info("Translating %d non-Chinese items for topic %s",
+                                len(non_zh), topic_id)
+                    await _translate_item_context(model, non_zh)
             except Exception as exc:
-                logger.warning("Translation step failed (non-blocking): %s", exc)
+                logger.warning("Translation step failed (non-blocking): %s", exc,
+                               exc_info=True)
 
         prompt = _build_report_prompt(topic, item_context, range_start, range_end)
 
-        # Create report record
         report = Report(
             id=f"rpt-{uuid4().hex[:12]}",
             topic_id=topic_id,
@@ -130,81 +113,37 @@ async def generate_report(
         db.add(report)
         db.commit()
         db.refresh(report)
-        report_id = report.id
-        report_title = report.title
 
-        # Call the LLM in a background task so the API returns immediately.
-        # Extract model attrs as a dict to avoid ORM session issues.
-        resolved_model_name = model_name_override or model.model_name
-        model_attrs = {
-            "id": model.id,
-            "base_url": model.base_url,
-            "api_key": model.api_key,
-            "model_name": resolved_model_name,
-            "provider": model.provider,
-            "temperature": model.temperature,
-            "max_tokens": model.max_tokens,
-            "top_p": model.top_p,
-        }
+        try:
+            llm_result = await _call_llm(model, prompt)
+            report.content = llm_result["content"]
+            report.summary = llm_result["summary"]
+            report.tokens_used = llm_result["tokens_used"]
+            report.status = "completed"
+        except Exception as exc:
+            logger.error("LLM call failed for report %s: %s", report.id, exc)
+            report.status = "failed"
+            report.error_log = str(exc)
 
-        async def _complete_report():
-            import asyncio
-            await asyncio.sleep(0)  # yield control
-            db2 = SessionLocal()
-            try:
-                rpt = db2.query(Report).filter(Report.id == report_id).first()
-                if not rpt:
-                    return
-                try:
-                    # Use the captured model attrs directly — no DB re-query needed
-                    from types import SimpleNamespace
-                    m = SimpleNamespace(**model_attrs)
-                    result = await _call_llm(m, prompt)
-                    rpt.content = result.get("content", "")
-                    rpt.summary = result.get("summary", "")
-                    rpt.tokens_used = result.get("tokens_used", 0)
-                    rpt.status = "completed"
-                    rpt.generated_at = datetime.now(timezone.utc)
-                    _export_report_files(db2, rpt, topic)
-                except Exception as exc:
-                    rpt.status = "failed"
-                    rpt.error_log = str(exc)
-                    logger.error("Report %s failed: %s", report_id, exc)
-                db2.commit()
-            finally:
-                db2.close()
-
-        asyncio.ensure_future(_complete_report())
-
-        return report
-
-    except ValueError as exc:
-        report = Report(
-            id=f"rpt-{uuid4().hex[:12]}",
-            topic_id=topic_id,
-            title=title_override or "报告生成失败",
-            status="failed",
-            error_log=str(exc),
-        )
-        db.add(report)
         db.commit()
+        db.refresh(report)
+
+        try:
+            _export_report_files(db, report, topic)
+        except Exception as exc:
+            logger.warning("Export step failed for report %s: %s", report.id, exc)
+
         return report
-    except Exception as exc:
-        logger.exception("Unexpected error generating report")
-        report = db.query(Report).order_by(Report.created_at.desc()).first()
-        raise
     finally:
         db.close()
 
 
-
 def _parse_iso(value: str | None) -> datetime | None:
-    """Parse an ISO date/datetime string into a tz-aware datetime, or None."""
     if not value:
         return None
     try:
-        s = value.strip().replace("Z", "+00:00")
-        dt = datetime.fromisoformat(s)
+        s = value.strip()
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
@@ -213,35 +152,34 @@ def _parse_iso(value: str | None) -> datetime | None:
 
 
 def _export_report_files(db: Session, report: Report, topic: Topic | None) -> None:
-    """Render the completed report to disk (best-effort; never raises)."""
     try:
         from app.report_export import export_report
-        from app.models import SystemConfig
-        system = db.query(SystemConfig).filter(SystemConfig.id == "global").first()
-        export_report(report, system, topic)
-    except Exception as exc:  # noqa: BLE001 — export must never break generation
-        logger.warning("report export skipped: %s", exc)
+        export_report(report, db, topic)
+    except ImportError:
+        logger.warning("report_export module not available, skipping export")
 
 
 def _build_item_context(items: list[CollectedItem]) -> list[dict]:
-    """Convert CollectedItem list to a structured context dict list."""
-    ctx = []
-    for it in items:
-        tags = [{"namespace": t.namespace, "value": t.value} for t in (it.tags or [])]
-        ctx.append({
+    """Build structured item context dict from ORM objects for prompt building."""
+    context = []
+    for idx, it in enumerate(items, 1):
+        context.append({
             "id": it.id,
-            "title": it.title,
+            "index": idx,
+            "title": it.title or "",
+            "content": (it.content or "")[:2000],
             "summary": it.summary or "",
-            "content": (it.content or "")[:2000],  # Truncate to fit context
             "url": it.url or "",
-            "source": it.source_id,
             "language": it.language or "unknown",
             "category": it.category or "unknown",
-            "tags": tags,
+            "source": it.source_id or "",
+            "tags": [{"namespace": t.namespace, "value": t.value}
+                     for t in it.tags] if it.tags else [],
             "published_at": it.published_at.isoformat() if it.published_at else "",
+            "quality_score": it.quality_score or 0.0,
             "relevance_score": it.relevance_score or 0.0,
         })
-    return ctx
+    return context
 
 
 def _build_report_prompt(
@@ -250,144 +188,83 @@ def _build_report_prompt(
     range_start: datetime | None = None,
     range_end: datetime | None = None,
 ) -> str:
-    """Build a structured prompt for the LLM to generate a comprehensive report."""
-
-    item_lines = []
-    for i, item in enumerate(items, 1):
-        tags_str = ", ".join(f"{t['namespace']}:{t['value']}" for t in item["tags"]) if item["tags"] else "-"
-        item_lines.append(f"""
-[{i}] {item['title']}
-    来源: {item['source']} | 语言: {item['language']} | 分类: {item['category']}
-    标签: {tags_str}
-    相关性: {item['relevance_score']}
-    摘要: {item.get('summary', '')}
-    内容: {item.get('content', '')[:500]}
-""")
-
-    items_text = "".join(item_lines)
-
-    # Build keyword_tags summary
-    keyword_info = ""
-    if topic.keyword_tags:
+    """Build the LLM prompt from topic metadata and item context."""
+    # Keywords with weights
+    kw_info = ""
+    if getattr(topic, 'keyword_tags', None):
         try:
-            kws = json.loads(topic.keyword_tags) if isinstance(topic.keyword_tags, str) else topic.keyword_tags
-            lines = [f"  - {kw.get('keyword', '')} (权重: {kw.get('weight', 1.0)})" for kw in kws if kw.get('keyword')]
-            if lines:
-                keyword_info = "关键词及权重:\n" + "\n".join(lines)
-        except (json.JSONDecodeError, TypeError):
+            kw_tags = json.loads(topic.keyword_tags) if isinstance(
+                topic.keyword_tags, str) else topic.keyword_tags
+            if kw_tags:
+                kw_lines = [f"- {t['keyword']}（权重: {t['weight']}）"
+                           for t in kw_tags]
+                kw_info = "关键词及权重:\n" + "\n".join(kw_lines) + "\n"
+        except (json.JSONDecodeError, TypeError, KeyError):
             pass
 
+    # Date range
     range_info = ""
-    if range_start or range_end:
-        start_str = range_start.strftime("%Y-%m-%d") if range_start else "(不限)"
+    if range_start:
+        start_str = range_start.strftime("%Y-%m-%d")
         end_str = range_end.strftime("%Y-%m-%d") if range_end else "(不限)"
-        range_info = f"\n数据时间范围: {start_str} 至 {end_str}"
+        range_info = f"数据时间范围: {start_str} ~ {end_str}\n"
 
-    prompt = f"""你是一位专业的跨境贸易与监管情报分析师。请根据以下采集到的信息，生成一份结构化综合分析报告。
+    # Items text — use enumerate for robust indexing
+    items_text_parts = []
+    for idx, it in enumerate(items, 1):
+        title = it.get("title", "")
+        source = it.get("source", "")
+        url = it.get("url", "")
+        category = it.get("category", "unknown")
+        summary = it.get("summary", "")
+        content = it.get("content", "")
+        index = it.get("index", idx)
+        parts = [
+            f"## 条目 {index}",
+            f"- 标题: {title}",
+            f"- 来源: {source}",
+            f"- URL: {url}",
+            f"- 分类: {category}",
+        ]
+        if summary:
+            parts.append(f"- 内容摘要: {summary}")
+        if content:
+            parts.append(f"\n{content[:2000]}")
+        items_text_parts.append("\n".join(parts))
+    items_text = "\n\n".join(items_text_parts)
 
-【重要规则 - 必须遵守】
-⚠️ 禁止虚构：本报告必须严格基于下方【详细条目】中的数据。不得捏造任何事实、数据、引文或观点。
-⚠️ 每一条结论都必须引用对应的条目编号作为证据，格式为 [参见条目N]（N为条目序号）。
-⚠️ 如果某个方向的证据不足，请明确说明"当前采集数据中未找到相关证据"。
-⚠️ 如果采集数据为空或不足以支撑报告框架，请在报告中如实反映数据局限性。
-⚠️ 所有观点必须有来源。没有来源的观点将视为无效。
+    prompt = f"""你是一位专业的跨境贸易监管与风险情报分析师。
+请基于以下采集数据，为用户生成一份专业的综合分析报告。
 
 【主题信息】
 主题名称: {topic.name}
 主题描述: {topic.description or '(无)'}
-{keyword_info}
+{kw_info}
+{range_info}
+【采集数据】
+共 {len(items)} 条信息条目。
 
-【采集数据概览】
-共 {len(items)} 条信息条目，跨越不同来源、语言和分类。{range_info}
+【详细条目】
 
-【详细条目】{items_text}
+{items_text}
 
 【报告要求】
 请按照以下结构生成中文报告（约 1500-3000 字）：
 
-1. **执行摘要**（Executive Summary）- 200字以内的核心结论
-2. **关键发现**（Key Findings）- 列出最重要的 3-5 个发现
-3. **数据概览**（Data Overview）- 来源分布、分类统计、时间趋势
-4. **详细分析**（Detailed Analysis）- 按主题或类别深入分析关键条目
-5. **趋势研判**（Trend Assessment）- 对重要信号的趋势判断
-6. **建议行动**（Recommended Actions）- 基于发现的可操作建议
+1. **执行摘要** — 200字以内的核心结论
+2. **关键发现** — 列出最重要的 3-5 个发现
+3. **数据概览** — 来源分布、分类统计、时间趋势
+4. **详细分析** — 按主题或类别深入分析关键条目
+5. **趋势研判** — 对重要信号的趋势判断
+6. **建议行动** — 基于发现的可操作建议
 
 格式要求：
-- 使用 Markdown 格式
-- 每个部分以 "## " 标题开头
-- 关键数据点和引用标注对应条目编号，如 [参见条目1]
+- 使用 Markdown 格式，每个部分以 "## " 标题开头
+- 引用条目时标注编号，如 [参见条目1]
 - 语言：中文
-- 引用条目时标注编号，如 [参见条目1]（编号对应【详细条目】中的条目序号）
 
 请回复两份内容，以 ===SEPARATOR=== 分隔：
 第一部分：报告全文
 第二部分：150字以内的摘要
 """
     return prompt
-
-
-async def _call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
-    """Call the LLM and return parsed result."""
-    base_url = model.base_url or "http://localhost:11434"
-    model_name = model.model_name
-
-    if model.provider == "ollama":
-        url = f"{base_url.rstrip('/')}/api/chat"
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "你是一位专业的跨境贸易与监管情报分析师。你只能使用下面提供的采集数据进行报告撰写。禁止虚构任何事实、数据或引用。每个观点必须有对应的条目编号和来源URL作为依据。如果采集数据不足以支持某个观点，请明确指出数据不足。如果采集数据为空，请如实报告无数据可用。"},
-                {"role": "user", "content": prompt},
-            ],
-            "stream": False,
-            "options": {
-                "temperature": model.temperature or 0.7,
-                "num_predict": model.max_tokens or 4096,
-            },
-        }
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            full = data.get("message", {}).get("content", "")
-
-    elif model.provider in ("openai", "lmstudio", "custom", "cc_switch"):
-        base = base_url.rstrip("/")
-        url = f"{base}/v1/chat/completions"
-        headers = {"Content-Type": "application/json"}
-        if model.api_key:
-            headers["Authorization"] = f"Bearer {model.api_key}"
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "你是一位专业的跨境贸易与监管情报分析师。你只能使用下面提供的采集数据进行报告撰写。禁止虚构任何事实、数据或引用。每个观点必须有对应的条目编号和来源URL作为依据。如果采集数据不足以支持某个观点，请明确指出数据不足。如果采集数据为空，请如实报告无数据可用。"},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": model.temperature or 0.7,
-            "max_tokens": model.max_tokens or 4096,
-            "top_p": model.top_p or 0.9,
-        }
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            full = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-    else:
-        raise ValueError(f"Unsupported provider: {model.provider}")
-
-    # Parse separator
-    parts = full.split("===SEPARATOR===")
-    content = parts[0].strip() if parts else full
-    summary = parts[1].strip() if len(parts) > 1 else _auto_summary(content)
-
-    return {
-        "content": content,
-        "summary": summary,
-        "tokens_used": len(full.split()),
-    }
-
-
-def _auto_summary(text: str) -> str:
-    """Fallback: first 200 chars as summary."""
-    return text[:200] + ("..." if len(text) > 200 else "")

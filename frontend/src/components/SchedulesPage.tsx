@@ -1,3 +1,4 @@
+import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, Play, Clock } from "lucide-react";
 import { fetchSchedules, createSchedule, deleteSchedule, runScheduleNow, fetchTopics, fetchSources } from "../api";
@@ -69,6 +70,7 @@ export function SchedulesPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,10 +87,16 @@ export function SchedulesPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(`删除调度 "${id}"？`)) return;
+  const handleDelete = (id: string) => {
+    setConfirmDelete({ id, message: `删除调度 "${id}"？` });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const id = confirmDelete.id;
     try { await deleteSchedule(id); setSchedules((p) => p.filter((s) => s.id !== id)); }
     catch (e) { alert(e instanceof Error ? e.message : "删除失败"); }
+    setConfirmDelete(null);
   };
 
   const handleRunNow = async (id: string) => {

@@ -55,7 +55,7 @@ def dashboard(db: Session = Depends(get_db)):
             "id": s.id, "name": s.name, "is_active": s.is_active,
             "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
             "items_collected": s.items_collected,
-            "last_run_status": last_run.status.value if last_run else None,
+            "last_run_status": last_run.status if last_run else None,
         })
 
     # Recent activity (last 7 days, per day)

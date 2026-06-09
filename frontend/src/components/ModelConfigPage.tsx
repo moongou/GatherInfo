@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Edit3, CheckCircle, XCircle, Zap, Cpu, List, Radar } from "lucide-react";
+import { Plus, Trash2, Edit3, Zap, Cpu, List, Radar } from "lucide-react";
 import { fetchModels, createModel, updateModel, deleteModel, testModel, listAvailableModels, autoDiscoverModels } from "../api";
+import { ConfirmDialog } from "./shared/ConfirmDialog";
+import { ModelForm } from "./ModelForm";
 import type { ModelConfig, ModelTestResult, ListModelsResult } from "../types";
 
 export function ModelConfigPage() {
@@ -15,6 +17,7 @@ export function ModelConfigPage() {
   const [listing, setListing] = useState<string | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [discoverMsg, setDiscoverMsg] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -30,10 +33,16 @@ export function ModelConfigPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(`删除模型 "${id}"？`)) return;
+  const handleDelete = (id: string) => {
+    setConfirmDelete({ id, message: `删除模型 "${id}"？` });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    const id = confirmDelete.id;
     try { await deleteModel(id); setModels((p) => p.filter((m) => m.id !== id)); }
     catch (e) { alert(e instanceof Error ? e.message : "删除失败"); }
+    setConfirmDelete(null);
   };
 
   const handleTest = async (id: string) => {
@@ -68,7 +77,7 @@ export function ModelConfigPage() {
         setDiscoverMsg("未发现本地可用的模型服务 (Ollama / LM Studio / CC Switch)。");
       } else {
         const parts = reachable.map((p) => `${p.provider} (${p.models.length} 个模型)`);
-        setDiscoverMsg(`发现可用服务：${parts.join("、")}。可点击“添加模型”手动配置。`);
+        setDiscoverMsg(`发现可用服务：${parts.join("、")}。可点击"添加模型"手动配置。`);
       }
     } catch (e) {
       setDiscoverMsg(`自动发现失败: ${e instanceof Error ? e.message : "未知错误"}`);
@@ -118,23 +127,22 @@ export function ModelConfigPage() {
 
       {models.length === 0 && (
         <div className="card-item" style={{ padding: 32, textAlign: "center" }}>
-          <Cpu size={32} className="text-muted" style={{ margin: "0 auto 12px", opacity: 0.5 }} />
-          <p className="text-muted">还未配置任何 AI 模型。</p>
-          <p className="text-muted small" style={{ marginTop: 4 }}>
-            添加一个 Ollama / OpenAI 兼容 / LM Studio 模型，即可使用报告生成功能。
-          </p>
+          <Cpu size={32} className="text-muted" style={{ marginBottom: 8 }} />
+          <p>尚未配置任何 AI 模型。</p>
+          <p className="text-muted small">点击"添加模型"连接本地 Ollama、OpenAI 兼容 API 或云端模型服务。</p>
+          <p className="text-muted small">也可以点击"自动发现"扫描本地正在运行的模型服务。</p>
         </div>
       )}
 
       <div className="card-list">
-        {[...models].sort((a,b)=>{if(a.is_default)return -1;if(b.is_default)return 1;return 0;}).map((m) => {
+        {models.map((m) => {
           const test = testResults[m.id];
           return (
-            <article key={m.id} className="card-item">
+            <article key={m.id} className={`card-item ${!m.is_active ? "card-item--muted" : ""}`}>
               <div className="card-item-header">
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 24 }}>{providerIcons[m.provider] || "🔧"}</span>
-                  <div>
+                <div>
+                  <div className="card-item-title">
+                    <span style={{ marginRight: 8 }}>{providerIcons[m.provider] || "🔧"}</span>
                     <h4 style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {m.name}
                       {m.is_default && <span className="chip chip--green">默认</span>}
@@ -233,175 +241,15 @@ export function ModelConfigPage() {
           onClose={() => { setShowCreate(false); setEditing(null); }}
         />
       )}
-    </div>
-  );
-}
 
-// ── Model Form ──────────────────────────────────────────────────────
-
-type ModelFormProps = {
-  model: ModelConfig | null;
-  onSave: (data: Partial<ModelConfig>) => Promise<void>;
-  onClose: () => void;
-};
-
-const PROVIDERS: { value: string; label: string; desc: string; group: string }[] = [
-  // Local
-  { value: "ollama", label: "Ollama（本地）", desc: "http://localhost:11434", group: "本地模型" },
-  { value: "cc_switch", label: "CC Switch / OpenClaw", desc: "本机统一模型通道代理", group: "本地模型" },
-  { value: "lmstudio", label: "LM Studio（本地）", desc: "http://localhost:1234", group: "本地模型" },
-  // Chinese providers
-  { value: "openai", label: "DeepSeek (深度求索)", desc: "api.deepseek.com", group: "国内大模型 API" },
-  { value: "openai", label: "通义千问 (Qwen/阿里云)", desc: "dashscope.aliyuncs.com", group: "国内大模型 API" },
-  { value: "openai", label: "智谱 GLM (智谱AI)", desc: "open.bigmodel.cn", group: "国内大模型 API" },
-  { value: "openai", label: "月之暗面 (Moonshot)", desc: "api.moonshot.cn", group: "国内大模型 API" },
-  { value: "openai", label: "文心一言 (百度)", desc: "aip.baidubce.com", group: "国内大模型 API" },
-  // Standard
-  { value: "openai", label: "OpenAI 兼容 API", desc: "标准 OpenAI 格式", group: "标准 API" },
-  { value: "custom", label: "自定义 API", desc: "任意兼容格式", group: "标准 API" },
-];
-
-function ModelForm({ model, onSave, onClose }: ModelFormProps) {
-  const [saving, setSaving] = useState(false);
-  const [id, setId] = useState(model?.id ?? "");
-  const [name, setName] = useState(model?.name ?? "");
-  const [provider, setProvider] = useState(model?.provider ?? "ollama");
-  const [baseUrl, setBaseUrl] = useState(model?.base_url ?? "");
-  const [apiKey, setApiKey] = useState(model?.api_key ?? "");
-  const [modelName, setModelName] = useState(model?.model_name ?? "");
-  const [temperature, setTemperature] = useState(String(model?.temperature ?? 0.7));
-  const [maxTokens, setMaxTokens] = useState(String(model?.max_tokens ?? 4096));
-  const [topP, setTopP] = useState(String(model?.top_p ?? 0.9));
-  const [isDefault, setIsDefault] = useState(model?.is_default ?? false);
-  const [description, setDescription] = useState(model?.description ?? "");
-
-  const handleProviderChange = (p: string) => {
-    setProvider(p);
-    if (!model) {
-      if (p === "ollama") setBaseUrl("http://localhost:11434");
-      if (p === "cc_switch") { setBaseUrl("http://localhost:8080"); setModelName("openclaw-channel"); }
-      if (p === "lmstudio") setBaseUrl("http://localhost:1234");
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 640 }}>
-        <h3>{model ? "编辑模型" : "添加 AI 模型"}</h3>
-
-        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          <label>ID
-            <input value={id} onChange={(e) => setId(e.target.value)} disabled={!!model} placeholder="my-llm" />
-          </label>
-          <label>名称
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="我的本地大模型" />
-          </label>
-
-          <label className="span-2">提供商
-            {(() => {
-              const groups: Record<string, typeof PROVIDERS> = {};
-              PROVIDERS.forEach((p) => {
-                if (!groups[p.group]) groups[p.group] = [];
-                groups[p.group].push(p);
-              });
-              return Object.entries(groups).map(([groupName, provs]) => (
-                <div key={groupName} style={{ marginBottom: 8 }}>
-                  <div className="text-muted small" style={{ marginBottom: 4, fontWeight: 600 }}>{groupName}</div>
-                  <div className="provider-selector">
-                    {provs.map((p) => (
-                      <button
-                        key={p.label}
-                        type="button"
-                        className={`provider-option ${provider === p.value && (p.label.includes(baseUrl) || !baseUrl) ? "provider-option--active" : ""}`}
-                        onClick={() => {
-                          handleProviderChange(p.value);
-                          // Quick-fill for Chinese providers
-                          if (p.label.includes("DeepSeek")) { setBaseUrl("https://api.deepseek.com/v1"); setModelName("deepseek-chat"); }
-                          else if (p.label.includes("通义千问")) { setBaseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1"); setModelName("qwen-plus"); }
-                          else if (p.label.includes("GLM")) { setBaseUrl("https://open.bigmodel.cn/api/paas/v4"); setModelName("glm-4-flash"); }
-                          else if (p.label.includes("月之暗面")) { setBaseUrl("https://api.moonshot.cn/v1"); setModelName("moonshot-v1-8k"); }
-                          else if (p.label.includes("文心一言")) { setBaseUrl("https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat"); setModelName("ernie-4.0-8k"); }
-                          else if (p.value === "cc_switch") { setBaseUrl("http://localhost:8080"); setModelName("openclaw-channel"); }
-                          else if (p.value === "ollama") { setBaseUrl("http://localhost:11434"); setModelName("llama3.1"); }
-                          else if (p.value === "lmstudio") { setBaseUrl("http://localhost:1234"); setModelName(""); }
-
-                        }}
-                      >
-                        <strong>{p.label}</strong>
-                        <span className="text-muted small">{p.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ));
-            })()}
-          </label>
-
-          <label className="span-2">API 地址
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={provider === "ollama" ? "http://localhost:11434" : "http://localhost:1234/v1"} />
-          </label>
-
-          <label>模型名称
-            <input value={modelName} onChange={(e) => setModelName(e.target.value)}
-              placeholder={provider === "ollama" ? "llama3.1" : "gpt-4o-mini"} />
-          </label>
-          <label>API Key {provider !== "ollama" ? <span className="text-red">*</span> : null}
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-              placeholder={provider === "ollama" ? "可留空" : "sk-..."} />
-          </label>
-
-          <label>温度 (temperature)
-            <div className="slider-with-input">
-              <input type="range" min="0" max="2" step="0.05" value={temperature}
-                onChange={(e) => setTemperature(e.target.value)} />
-              <span className="slider-val">{temperature}</span>
-            </div>
-          </label>
-          <label>Top-P
-            <div className="slider-with-input">
-              <input type="range" min="0" max="1" step="0.05" value={topP}
-                onChange={(e) => setTopP(e.target.value)} />
-              <span className="slider-val">{topP}</span>
-            </div>
-          </label>
-
-          <label>最大令牌 (max_tokens)
-            <div className="slider-with-input">
-              <input type="range" min="256" max="32768" step="256" value={maxTokens}
-                onChange={(e) => setMaxTokens(e.target.value)} />
-              <span className="slider-val">{parseInt(maxTokens).toLocaleString()}</span>
-            </div>
-          </label>
-          <label className="checkbox-label">
-            <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
-            <span>设为默认模型</span>
-          </label>
-
-          <label className="span-2">描述
-            <input value={description} onChange={(e) => setDescription(e.target.value)}
-              placeholder="例如：本地运行的 Qwen2.5 7B 模型，用于报告生成" />
-          </label>
-        </div>
-
-        <div className="modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
-          <button type="button" className="btn btn-primary" onClick={async () => {
-            setSaving(true);
-            try {
-              await onSave({
-                id, name, provider, description: description || null,
-                base_url: baseUrl || null, api_key: apiKey || null,
-                model_name: modelName, is_default: isDefault,
-                temperature: parseFloat(temperature), max_tokens: parseInt(maxTokens), top_p: parseFloat(topP),
-              });
-            } catch (e) { alert(e instanceof Error ? e.message : "保存失败"); }
-            setSaving(false);
-          }} disabled={saving || !id || !name}>
-            {saving ? "保存中..." : "保存"}
-          </button>
-        </div>
-      </div>
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={executeDelete}
+        title="删除模型"
+        message={confirmDelete?.message || ""}
+        variant="danger"
+      />
     </div>
   );
 }

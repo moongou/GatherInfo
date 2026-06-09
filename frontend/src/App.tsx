@@ -1,22 +1,41 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense, lazy } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree,
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History,
 } from "lucide-react";
 
-import { DashboardPage } from "./components/DashboardPage";
-import { TopicsPage } from "./components/TopicsPage";
-import { SourcesPage } from "./components/SourcesPage";
-import { ItemsPage } from "./components/ItemsPage";
-import { TagsPage } from "./components/TagsPage";
-import { SchedulesPage } from "./components/SchedulesPage";
-import { ModelConfigPage } from "./components/ModelConfigPage";
-import { SettingsPage } from "./components/SettingsPage";
-import { HistoryPage } from "./components/HistoryPage";
-import { CategoriesPage } from "./components/CategoriesPage";
-import { ReportsPage } from "./components/ReportsPage";
+import { fetchDashboard } from "./api";
+import type { DashboardData } from "./types";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-type ViewId = "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings";
+// ── Lazy-loaded page components (code-split per view) ──────────────────
+
+const DashboardPage = lazy(() => import("./components/DashboardPage").then(m => ({ default: m.DashboardPage })));
+const TopicsPage = lazy(() => import("./components/TopicsPage").then(m => ({ default: m.TopicsPage })));
+const SourcesPage = lazy(() => import("./components/SourcesPage").then(m => ({ default: m.SourcesPage })));
+const ItemsPage = lazy(() => import("./components/ItemsPage").then(m => ({ default: m.ItemsPage })));
+const TagsPage = lazy(() => import("./components/TagsPage").then(m => ({ default: m.TagsPage })));
+const SchedulesPage = lazy(() => import("./components/SchedulesPage").then(m => ({ default: m.SchedulesPage })));
+const ModelConfigPage = lazy(() => import("./components/ModelConfigPage").then(m => ({ default: m.ModelConfigPage })));
+const SettingsPage = lazy(() => import("./components/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const HistoryPage = lazy(() => import("./components/HistoryPage").then(m => ({ default: m.HistoryPage })));
+const CategoriesPage = lazy(() => import("./components/CategoriesPage").then(m => ({ default: m.CategoriesPage })));
+const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ default: m.ReportsPage })));
+const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
+
+// ── Loading fallback ───────────────────────────────────────────────────
+
+function PageLoader() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0" }}>
+      <div className="page-loader">
+        <div className="page-loader-spinner" />
+        <span style={{ color: "var(--ink-muted)", fontSize: "0.85rem" }}>加载中...</span>
+      </div>
+    </div>
+  );
+}
+
+type ViewId = "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -34,19 +53,61 @@ const views: ViewDef[] = [
   { id: "reports", label: "智能报告", icon: FileText },
   { id: "models", label: "模型配置", icon: Cpu },
   { id: "schedules", label: "周期调度", icon: Clock },
-  { id: "history", label: "采集历史", icon: Clock },
+  { id: "history", label: "采集历史", icon: History },
+  { id: "notifications", label: "通知管理", icon: Bell },
   { id: "settings", label: "系统配置", icon: Settings },
 ];
 
+/** Time-of-day greeting in Chinese */
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 6) return "夜深了";
+  if (h < 12) return "上午好";
+  if (h < 18) return "下午好";
+  return "晚上好";
+}
+
+/** Radar-scan logo — 3 concentric arcs + a pulse dot, clean line-art style */
+function AppLogo() {
+  return (
+    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Radar arcs — opening toward top-right */}
+      <path d="M20 4 A16 16 0 0 1 35.3 12.7" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" opacity="0.9" />
+      <path d="M20 9 A11 11 0 0 1 30 15" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" opacity="0.65" />
+      <path d="M20 14 A6 6 0 0 1 24.5 17.5" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
+      {/* Pulse dot at leading edge */}
+      <circle cx="35.3" cy="12.7" r="2.5" fill="#22c55e" opacity="0.9">
+        <animate attributeName="opacity" values="0.9;0.3;0.9" dur="2s" repeatCount="indefinite" />
+      </circle>
+      {/* Subtle center dot */}
+      <circle cx="20" cy="20" r="2" fill="#3b82f6" opacity="0.5" />
+    </svg>
+  );
+}
+
 export function App() {
   const [view, setView] = useState<ViewId>("dashboard");
+  const [dashData, setDashData] = useState<DashboardData | null>(null);
 
   const activeDef = useMemo(() => views.find((v) => v.id === view) ?? views[0], [view]);
+
+  // Fetch dashboard summary for the dynamic greeting
+  useEffect(() => {
+    let cancelled = false;
+    fetchDashboard().then((d) => { if (!cancelled) setDashData(d); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const itemsToday = dashData?.summary?.items_today ?? 0;
 
   return (
     <div className="app-shell">
       <aside className="side-rail">
-        <div className="brand">GatherInfo<div style={{ fontSize: "0.62rem", fontWeight: 400, color: "var(--ink-muted)", letterSpacing: "0.04em", marginTop: 2 }}>全球信息采集监控平台</div></div>
+        <div className="brand">
+          <AppLogo />
+          <span className="brand-name">GatherInfo</span>
+          <span className="brand-sub">global trade intelligence</span>
+        </div>
         <nav>
           {views.map((v) => {
             const Icon = v.icon;
@@ -68,45 +129,36 @@ export function App() {
       </aside>
       <main className="workspace">
         <header className="workspace-header">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-            <h1>GatherInfo</h1>
-            <span className="subtitle">主题驱动·多源采集·智能报告</span>
+          <div className="header-greeting">
+            <span className="greeting-text">{greeting()}，今日已采集 <strong>{itemsToday.toLocaleString()}</strong> 条新情报</span>
           </div>
-          <div className="app-logo" style={{
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            width: 36, height: 36, borderRadius: 10,
-            background: "linear-gradient(135deg, rgba(59,130,246,0.18), rgba(34,197,94,0.10))",
-            border: "1px solid rgba(59,130,246,0.25)",
-            position: "relative", overflow: "hidden"
-          }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="9" stroke="#3b82f6" strokeWidth="1.5" opacity="0.7"/>
-              <ellipse cx="12" cy="12" rx="7" ry="2.5" stroke="#3b82f6" strokeWidth="0.8" opacity="0.5"/>
-              <ellipse cx="12" cy="9" rx="6" ry="1.5" stroke="#3b82f6" strokeWidth="0.6" opacity="0.3"/>
-              <ellipse cx="12" cy="15" rx="6" ry="1.5" stroke="#3b82f6" strokeWidth="0.6" opacity="0.3"/>
-              <line x1="12" y1="3" x2="12" y2="21" stroke="#3b82f6" strokeWidth="0.8" opacity="0.4"/>
-              <text x="12" y="16" textAnchor="middle" fontSize="11" fontWeight="700" fill="#3b82f6" fontFamily="Inter, sans-serif" letterSpacing="0.5">g</text>
-              <circle cx="20" cy="7" r="1.5" fill="#22c55e" opacity="0.8"/>
-              <circle cx="19" cy="18" r="1" fill="#22c55e" opacity="0.5"/>
-              <circle cx="5" cy="17" r="1.2" fill="#22c55e" opacity="0.6"/>
-              <circle cx="4" cy="8" r="0.8" fill="#22c55e" opacity="0.4"/>
-              <path d="M12 3 A9 9 0 0 1 20.5 7.5" stroke="#22c55e" strokeWidth="1.2" strokeLinecap="round" opacity="0.6"/>
-            </svg>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="btn-icon header-action-btn"
+              title="刷新仪表盘"
+              onClick={() => { setView("dashboard"); }}
+            >
+              <LayoutDashboard size={18} />
+            </button>
           </div>
         </header>
         <section className="view-frame">
            <ErrorBoundary key={view}>
-             {view === "dashboard" && <DashboardPage />}
-             {view === "categories" && <CategoriesPage />}
-             {view === "topics" && <TopicsPage />}
-             {view === "sources" && <SourcesPage />}
-             {view === "items" && <ItemsPage />}
-             {view === "tags" && <TagsPage />}
-             {view === "reports" && <ReportsPage />}
-             {view === "models" && <ModelConfigPage />}
-             {view === "history" && <HistoryPage />}
-             {view === "settings" && <SettingsPage />}
-             {view === "schedules" && <SchedulesPage />}
+             <Suspense fallback={<PageLoader />}>
+               {view === "dashboard" && <DashboardPage />}
+               {view === "categories" && <CategoriesPage />}
+               {view === "topics" && <TopicsPage />}
+               {view === "sources" && <SourcesPage />}
+               {view === "items" && <ItemsPage />}
+               {view === "tags" && <TagsPage />}
+               {view === "reports" && <ReportsPage />}
+               {view === "models" && <ModelConfigPage />}
+               {view === "history" && <HistoryPage />}
+               {view === "notifications" && <NotificationsPage />}
+               {view === "settings" && <SettingsPage />}
+               {view === "schedules" && <SchedulesPage />}
+             </Suspense>
            </ErrorBoundary>
         </section>
       </main>

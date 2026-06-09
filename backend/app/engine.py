@@ -76,7 +76,7 @@ class CollectionEngine:
         # Translate non-Chinese items to Chinese before storing
         if model and result.items:
             try:
-                from app.report_engine import _call_llm
+                from app.llm_client import call_llm as _call_llm
                 translated = await self._translate_fetch_items(result.items, model)
                 if translated:
                     result.items = translated
@@ -145,6 +145,26 @@ class CollectionEngine:
             topic.last_collection_run_id = run_id
         self.db.commit()
 
+        # Fire-and-forget notifications after collection
+        try:
+            from app.notification_models import NotificationSender
+            from app.database import SessionLocal
+            sender = NotificationSender(SessionLocal)
+            total_new = sum(r.items_new or 0 for r in final)
+            sender.send(
+                "new_items" if total_new > 0 else "completion",
+                {
+                    "event": "collection_complete",
+                    "topic_id": topic_id,
+                    "topic_name": topic.name,
+                    "total_new": total_new,
+                    "source_count": len(final),
+                    "batch_id": batch_id,
+                    "timestamp": utc_now().isoformat(),
+                }
+            )
+        except Exception as exc:
+            logger.warning("Notification after collection failed: %s", exc)
         return final
 
     # ── Scheduled collection ────────────────────────────────────────────

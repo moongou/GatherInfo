@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: gatherinfo-backend
+    ports:
+      - "8109:8109"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ENV=production
+      - CORS_ORIGINS=http://localhost,http://127.0.0.1
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: gatherinfo-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

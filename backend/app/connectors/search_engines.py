@@ -1,5 +1,5 @@
 """
-Baidu, 360, and general web search API connectors.
+Baidu, Bing, 360, and general web search API connectors.
 
 Configuration per source:
   auth_config: {
@@ -18,6 +18,7 @@ Environment variables expected:
   BING_API_KEY          → Bing Search API
   BAIDU_INDEX_API_KEY   → Baidu Index API (trend data)
 """
+import logging
 import os
 import asyncio
 from urllib.parse import urlencode
@@ -28,6 +29,11 @@ from app.connectors.base import (
     BaseCollector, CollectResult, FetchItem,
     JobStatus, SourceConfig, register_collector,
 )
+from app.connectors._helpers import (
+    result, detect_lang, infer_category, build_tags, extract_title, extract_body,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @register_collector("api_search")
@@ -65,9 +71,7 @@ class SearchEngineDispatcher(BaseCollector):
 
 
 class BaiduDelegate(BaseCollector):
-    """
-    Baidu Custom Search API.
-    """
+    """Baidu Custom Search API."""
     channel = "api_search"
     BASE = "https://api.baidu.com/search/customsearch/v1"
 
@@ -92,8 +96,10 @@ class BaiduDelegate(BaseCollector):
 
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
         if not self.api_key:
+            logger.warning("BAIDU_API_KEY not set for source %s", self.config.id)
             return self._error("BAIDU_API_KEY not set")
         if not self.cx:
+            logger.warning("BAIDU_CX not set for source %s", self.config.id)
             return self._error("BAIDU_CX (search engine ID) not set")
 
         items: list[FetchItem] = []
@@ -112,6 +118,7 @@ class BaiduDelegate(BaseCollector):
                     })
                     if resp.status_code == 429:
                         errors.append(f"Rate limited: {query}")
+                        logger.warning("Baidu rate limited for query: %s", query[:60])
                         await asyncio.sleep(2)
                         continue
                     resp.raise_for_status()
@@ -124,88 +131,18 @@ class BaiduDelegate(BaseCollector):
                             url=r.get("link", r.get("url", "")),
                             summary=r.get("snippet", "")[:500],
                             language="zh",
-                            category=_infer_cat(title, r.get("snippet", "")),
-                            suggested_tags=_build_tags(title, r.get("snippet", "")),
+                            category=infer_category(title, r.get("snippet", "")),
+                            suggested_tags=build_tags(title, r.get("snippet", "")),
                             raw_metadata={"engine": "baidu", "query": query, "region": self.region},
                         ))
-                    await asyncio.sleep(1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
+                    await asyncio.sleep(1.0 / self.config.rate_limit_rps)
                 except Exception as exc:
-                    errors.append(f"Baidu '{query[:30]}': {exc}")
+                    msg = f"Baidu search failed for '{query[:60]}': {exc}"
+                    errors.append(msg)
+                    logger.error("Baidu fetch error for source %s: %s", self.config.id, exc)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
-
-    def _error(self, msg: str) -> CollectResult:
-        return CollectResult(run_id=self._new_run_id(), source_id=self.config.id,
-                             status=JobStatus.FAILED, items=[], error_log=[msg])
-
-
-@register_collector("api_search_360")
-class Search360Collector(BaseCollector):
-    """
-    360 Search API (好搜).
-
-    360 provides a web search API similar to Baidu's.
-    Requires: 360_API_KEY (or API_TOKEN in auth_config).
-    """
-    channel = "api_search"
-    BASE = "https://openapi.so.com/search"
-
-    def __init__(self, config: SourceConfig):
-        super().__init__(config)
-        ac = config.auth_config or {}
-        self.api_key = ac.get("api_key", "") or os.getenv("SO360_API_KEY", "")
-
-    async def validate(self) -> bool:
-        if not self.api_key:
-            return False
-        try:
-            async with httpx.AsyncClient(timeout=10) as c:
-                resp = await c.get(self.BASE, params={
-                    "key": self.api_key, "q": "test", "num": 1,
-                })
-                return resp.status_code == 200
-        except Exception:
-            return False
-
-    async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
-        if not self.api_key:
-            return self._error("SO360_API_KEY not set")
-
-        items: list[FetchItem] = []
-        errors: list[str] = []
-        per_query = min(10, max_items // max(1, len(keywords)))
-
-        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
-            for query in keywords:
-                if len(items) >= max_items:
-                    break
-                try:
-                    resp = await client.get(self.BASE, params={
-                        "key": self.api_key, "q": query, "num": per_query,
-                    })
-                    if resp.status_code == 429:
-                        errors.append(f"360 rate limit: {query}")
-                        await asyncio.sleep(2)
-                        continue
-                    resp.raise_for_status()
-                    data = resp.json()
-                    for r in data.get("items", data.get("results", [])):
-                        title = r.get("title", "")
-                        items.append(FetchItem(
-                            title=title,
-                            content=r.get("summary", r.get("content", "")),
-                            url=r.get("url", r.get("link", "")),
-                            summary=r.get("summary", "")[:500],
-                            language="zh",
-                            category=_infer_cat(title, r.get("summary", "")),
-                            suggested_tags=_build_tags(title, r.get("summary", "")),
-                            raw_metadata={"engine": "360"},
-                        ))
-                    await asyncio.sleep(1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
-                except Exception as exc:
-                    errors.append(f"360 '{query[:30]}': {exc}")
-
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        logger.info("Baidu: %d items, %d errors for source %s", len(items), len(errors), self.config.id)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
     def _error(self, msg: str) -> CollectResult:
         return CollectResult(run_id=self._new_run_id(), source_id=self.config.id,
@@ -213,9 +150,7 @@ class Search360Collector(BaseCollector):
 
 
 class BingDelegate(BaseCollector):
-    """
-    Microsoft Bing Web Search API.
-    """
+    """Microsoft Bing Web Search API."""
     channel = "api_search"
     BASE = "https://api.bing.microsoft.com/v7.0/search"
 
@@ -237,12 +172,12 @@ class BingDelegate(BaseCollector):
 
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
         if not self.api_key:
+            logger.warning("BING_API_KEY not set for source %s", self.config.id)
             return self._error("BING_API_KEY not set")
 
         items: list[FetchItem] = []
         errors: list[str] = []
-        headers = {"Ocp-Apim-Subscription-Key": self.api_key}
-        count = min(50, max_items)
+        per_query = min(10, max_items // max(1, len(keywords)))
 
         async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
             for query in keywords:
@@ -250,39 +185,103 @@ class BingDelegate(BaseCollector):
                     break
                 try:
                     resp = await client.get(self.BASE, params={
-                        "q": query, "count": count, "mkt": self.market,
-                    }, headers=headers)
-                    if resp.status_code == 429:
-                        errors.append(f"Bing rate limit: {query}")
-                        await asyncio.sleep(2)
-                        continue
+                        "q": query, "count": per_query, "mkt": self.market,
+                    }, headers={"Ocp-Apim-Subscription-Key": self.api_key})
                     resp.raise_for_status()
                     data = resp.json()
-                    for page in data.get("webPages", {}).get("value", []):
+                    for r in data.get("webPages", {}).get("value", []):
+                        title = r.get("name", "")
                         items.append(FetchItem(
-                            title=page.get("name", ""),
-                            content=page.get("snippet", page.get("summary", "")),
-                            url=page.get("url", ""),
-                            summary=page.get("snippet", "")[:500],
-                            language=_detect_lang(page.get("url", ""), page.get("snippet", "")),
-                            raw_metadata={"engine": "bing"},
+                            title=title,
+                            content=r.get("snippet", ""),
+                            url=r.get("url", ""),
+                            summary=r.get("snippet", "")[:500],
+                            language=detect_lang(f"{title} {r.get('snippet', '')}"),
+                            category=infer_category(title, r.get("snippet", "")),
+                            suggested_tags=build_tags(title, r.get("snippet", "")),
+                            raw_metadata={"engine": "bing", "query": query, "market": self.market},
                         ))
-                    await asyncio.sleep(1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
+                    await asyncio.sleep(1.0 / self.config.rate_limit_rps)
                 except Exception as exc:
-                    errors.append(f"Bing '{query[:30]}': {exc}")
+                    errors.append(f"Bing search failed for '{query[:60]}': {exc}")
+                    logger.error("Bing fetch error for source %s: %s", self.config.id, exc)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        logger.info("Bing: %d items, %d errors for source %s", len(items), len(errors), self.config.id)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
     def _error(self, msg: str) -> CollectResult:
         return CollectResult(run_id=self._new_run_id(), source_id=self.config.id,
                              status=JobStatus.FAILED, items=[], error_log=[msg])
 
 
-class TargetedScrapeCollector(BaseCollector):
-    """
-    Targeted URL scraping — collect from specific URLs defined in the topic.
+class Search360Delegate(BaseCollector):
+    """360 Search API (unofficial, based on So.com)."""
+    channel = "api_search"
+    BASE = "https://www.so.com/s"
 
-    The topic's `target_urls` field drives which URLs to scrape.
+    async def validate(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                resp = await c.get(self.BASE, params={"q": "test"})
+                return resp.status_code == 200
+        except Exception:
+            return False
+
+    async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
+        items: list[FetchItem] = []
+        errors: list[str] = []
+        per_query = min(10, max_items // max(1, len(keywords)))
+
+        async with httpx.AsyncClient(
+            timeout=self.config.timeout_seconds,
+            headers={"User-Agent": "GatherInfo/0.4"},
+            follow_redirects=True,
+        ) as client:
+            for query in keywords:
+                if len(items) >= max_items:
+                    break
+                try:
+                    resp = await client.get(self.BASE, params={"q": query, "pn": 0})
+                    resp.raise_for_status()
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(resp.text, "lxml")
+                    for el in soup.select(".result, .res-list, li.res")[:per_query]:
+                        a = el.select_one("a[href]")
+                        if not a:
+                            continue
+                        title = a.get_text(strip=True)
+                        abs_el = el.select_one(".res-desc, .result-abs, .abstract")
+                        snippet = abs_el.get_text(strip=True) if abs_el else ""
+                        items.append(FetchItem(
+                            title=title,
+                            content=snippet,
+                            url=a.get("href", ""),
+                            summary=snippet[:500],
+                            language="zh",
+                            category=infer_category(title, snippet),
+                            suggested_tags=build_tags(title, snippet),
+                            raw_metadata={"engine": "360", "query": query},
+                        ))
+                    await asyncio.sleep(1.0 / self.config.rate_limit_rps)
+                except Exception as exc:
+                    errors.append(f"360 search failed for '{query[:60]}': {exc}")
+                    logger.error("360 fetch error for source %s: %s", self.config.id, exc)
+
+        logger.info("360: %d items, %d errors for source %s", len(items), len(errors), self.config.id)
+        return result(self._new_run_id(), self.config.id, items, errors)
+
+    def _error(self, msg: str) -> CollectResult:
+        return CollectResult(run_id=self._new_run_id(), source_id=self.config.id,
+                             status=JobStatus.FAILED, items=[], error_log=[msg])
+
+
+# ── Targeted Web Scrape Collector (registered as web_scrape for URL-based scraping) ──
+
+@register_collector("web_scrape")
+class TargetedScrapeCollector(BaseCollector):
+    """Targeted URL-based web scraping collector.
+
+    Reads URLs from the `keywords` list (or source config's `target_urls` field).
     Each URL is fetched, parsed with BS4, and relevant content is extracted.
     """
     channel = "web_scrape"
@@ -294,7 +293,8 @@ class TargetedScrapeCollector(BaseCollector):
         items: list[FetchItem] = []
         errors: list[str] = []
         ac = self.config.auth_config or {}
-        content_sel = ac.get("content_selector", "article, .content, main, .article-content, #content")
+        content_sel = ac.get("content_selector",
+                             "article, .content, main, .article-content, #content")
 
         async with httpx.AsyncClient(
             timeout=self.config.timeout_seconds,
@@ -309,96 +309,28 @@ class TargetedScrapeCollector(BaseCollector):
                     resp.raise_for_status()
                     from bs4 import BeautifulSoup
                     soup = BeautifulSoup(resp.text, "lxml")
-                    title = _extract_title(soup)
-                    body = _extract_body(soup, content_sel)
+                    title = extract_title(soup)
+                    body = extract_body(soup, content_sel)
                     items.append(FetchItem(
                         title=title or url,
                         content=body[:5000],
                         url=url,
                         summary=body[:500],
-                        language=_detect_lang(url, body),
-                        suggested_tags=_build_tags(title or "", body),
+                        language=detect_lang(body),
+                        suggested_tags=build_tags(title or "", body),
                         raw_metadata={"engine": "targeted_scrape"},
                     ))
-                    await asyncio.sleep(1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
+                    await asyncio.sleep(
+                        1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
                 except Exception as exc:
                     errors.append(f"{url[:60]}: {exc}")
+                    logger.error("Targeted scrape error for source %s url %s: %s",
+                                 self.config.id, url[:80], exc)
 
-        return _result(self._new_run_id(), self.config.id, items, errors)
+        logger.info("TargetedScrape: %d items, %d errors for source %s",
+                     len(items), len(errors), self.config.id)
+        return result(self._new_run_id(), self.config.id, items, errors)
 
     def _error(self, msg: str) -> CollectResult:
         return CollectResult(run_id=self._new_run_id(), source_id=self.config.id,
                              status=JobStatus.FAILED, items=[], error_log=[msg])
-
-
-# ── Shared helpers ───────────────────────────────────────────────────────────
-
-def _result(run_id: str, source_id: str, items: list[FetchItem], errors: list[str]) -> CollectResult:
-    st = JobStatus.COMPLETED
-    if not items and errors:
-        st = JobStatus.FAILED
-    elif errors:
-        st = JobStatus.PARTIAL
-    return CollectResult(run_id=run_id, source_id=source_id, status=st,
-                         items=items, items_new=len(items), items_failed=len(errors),
-                         error_log=errors if errors else None)
-
-
-def _infer_cat(title: str, content: str) -> str | None:
-    text = f"{title} {content}"[:500].lower()
-    for kws, cat in [
-        (["关税", "tariff", "税率", "duty"], "tariff"),
-        (["法规", "regulation", "政策", "law"], "regulation"),
-        (["贸易", "trade", "export", "进口", "出口"], "trade"),
-        (["技术", "technology", "ai", "芯片", "半导体"], "technology"),
-        (["能源", "energy", "oil", "solar", "光伏"], "energy"),
-    ]:
-        if any(k in text for k in kws):
-            return cat
-    return "general"
-
-
-def _build_tags(title: str, content: str) -> list[str]:
-    text = f"{title} {content}"[:1000].lower()
-    tags = []
-    tag_map = {
-        "product:battery": ["电池", "battery", "锂电"],
-        "product:solar": ["光伏", "solar"],
-        "product:semiconductor": ["芯片", "半导体", "semiconductor"],
-        "product:ev": ["电动汽车", "新能源车", "电动"],
-        "product:steel": ["钢", "steel"],
-        "country:cn": ["中国", "china"],
-        "country:us": ["美国", "united states"],
-        "country:eu": ["欧盟", "european union"],
-        "event:tariff": ["关税", "tariff", "税率"],
-        "event:regulation": ["法规", "regulation", "政策"],
-        "event:sanction": ["制裁", "sanction"],
-    }
-    for tid, kws in tag_map.items():
-        if any(k in text for k in kws):
-            tags.append(tid)
-    return tags[:8]
-
-
-def _detect_lang(url: str, text: str) -> str:
-    import re
-    combined = f"{url} {text}"[:500]
-    cjk = len(re.findall(r'[一-鿿]', combined))
-    return "zh" if cjk > 3 else "en"
-
-
-def _extract_title(soup) -> str:
-    for sel in ["h1", "title", "meta[property='og:title']", ".article-title"]:
-        el = soup.select_one(sel)
-        if el:
-            return el.get("content", "") or el.get_text(strip=True)
-    return ""
-
-
-def _extract_body(soup, content_sel: str) -> str:
-    for tag in soup.select("script, style, nav, footer, .ad, .sidebar"):
-        tag.decompose()
-    el = soup.select_one(content_sel) if content_sel else None
-    if el:
-        return el.get_text(separator="\n", strip=True)[:5000]
-    return soup.get_text(separator="\n", strip=True)[:5000]
