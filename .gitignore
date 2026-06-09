@@ -16,3 +16,4 @@ logs/
 .dev-pids
 
 # Project docs
+data/backups/

@@ -31,6 +31,39 @@ export function DashboardPage() {
     setRefreshing(null);
   }, [refresh]);
 
+  // Source health → horizontal bar chart
+  const sourceBarOption: EChartsOption = useMemo(() => {
+    const sorted = [...(data?.source_health ?? [])].sort((a, b) => b.items_collected - a.items_collected).slice(0, 12);
+    return {
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      grid: { left: 120, right: 40, top: 5, bottom: 20 },
+      xAxis: { type: "value", axisLabel: { fontSize: 10, color: "#7e93b0" }, splitLine: { lineStyle: { color: "#1e3a5f", type: "dashed" } } },
+      yAxis: {
+        type: "category",
+        data: sorted.map((s) => s.name),
+        axisLabel: { fontSize: 11, color: "#cbd5e1", width: 110, overflow: "truncate" },
+        axisLine: { show: false },
+        axisTick: { show: false },
+      },
+      series: [{
+        type: "bar",
+        data: sorted.map((s) => ({
+          value: s.items_collected,
+          itemStyle: { color: s.is_active ? "#3b82f6" : "#475569", borderRadius: [0, 4, 4, 0] },
+        })),
+        barWidth: 16,
+        label: { show: true, position: "right", fontSize: 10, color: "#7e93b0" },
+      }],
+    };
+  }, [data?.source_health]);
+
+  // Tag font-size scaling
+  const maxTagCount = useMemo(
+    () => Math.max(1, ...(data?.top_tags ?? []).slice(0, 20).map((t) => t.count)),
+    [data?.top_tags],
+  );
+
+
   if (loading) return <div className="loading">加载仪表盘...</div>;
   if (error) return <div className="error-banner">{error}</div>;
   if (!data) return null;
@@ -84,37 +117,6 @@ export function DashboardPage() {
     }],
   };
 
-  // Source health → horizontal bar chart
-  const sourceBarOption: EChartsOption = useMemo(() => {
-    const sorted = [...source_health].sort((a, b) => b.items_collected - a.items_collected).slice(0, 12);
-    return {
-      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-      grid: { left: 120, right: 40, top: 5, bottom: 20 },
-      xAxis: { type: "value", axisLabel: { fontSize: 10, color: "#7e93b0" }, splitLine: { lineStyle: { color: "#1e3a5f", type: "dashed" } } },
-      yAxis: {
-        type: "category",
-        data: sorted.map((s) => s.name),
-        axisLabel: { fontSize: 11, color: "#cbd5e1", width: 110, overflow: "truncate" },
-        axisLine: { show: false },
-        axisTick: { show: false },
-      },
-      series: [{
-        type: "bar",
-        data: sorted.map((s) => ({
-          value: s.items_collected,
-          itemStyle: { color: s.is_active ? "#3b82f6" : "#475569", borderRadius: [0, 4, 4, 0] },
-        })),
-        barWidth: 16,
-        label: { show: true, position: "right", fontSize: 10, color: "#7e93b0" },
-      }],
-    };
-  }, [source_health]);
-
-  // Tag font-size scaling
-  const maxTagCount = useMemo(
-    () => Math.max(1, ...top_tags.slice(0, 20).map((t) => t.count)),
-    [top_tags],
-  );
 
   return (
     <div className="dashboard">

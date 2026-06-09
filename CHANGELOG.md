@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2] — 2026-06-09
+
+### Bug 修复
+- **仪表盘页面加载失败**：修复 DashboardPage.tsx 中两个 `useMemo` hooks（`sourceBarOption`、`maxTagCount`）位于早期 return 之后导致的 React "Rendered more hooks" 错误，将 hooks 上移至 early return 前，引用改为 `data?.` 可选链
+
+### 维护
+- `.gitignore` 新增 `data/backups/` 规则，排除数据库备份目录
+
 ## [0.4.0] — 2026-06-07
 ## [0.4.1] — 2026-06-07
 
