@@ -71,10 +71,14 @@ export interface CollectedItem {
   source_id: string;
   run_id: string | null;
   title: string;
+  title_zh: string | null;
   content: string | null;
+  content_zh: string | null;
   summary: string | null;
+  summary_zh: string | null;
   url: string | null;
   language: string | null;
+  translation_status: string | null;
   category: string | null;
   tags: TagRef[];
   entities: Record<string, unknown> | null;

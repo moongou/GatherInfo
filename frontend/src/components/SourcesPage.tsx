@@ -1,6 +1,6 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap } from "lucide-react";
+import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X } from "lucide-react";
 import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors } from "../api";
 import type { Source, ConnectorInfo } from "../types";
 
@@ -14,6 +14,7 @@ export function SourcesPage() {
   const [initialLoad, setInitialLoad] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [sourceTab, setSourceTab] = useState<"configured" | "standby">("configured");
+  const [sourceSearch, setSourceSearch] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +52,10 @@ export function SourcesPage() {
       alert(e instanceof Error ? e.message : "验证失败");
     }
   };
+
+  const visibleSources = sources
+    .filter((s) => sourceTab === "configured" ? s.is_configured : !s.is_configured)
+    .filter((s) => matchesSourceSearch(s, sourceSearch));
 
   if (initialLoad) return <div className="loading">加载信息源...</div>;
   if (loading) return null;
@@ -95,8 +100,33 @@ export function SourcesPage() {
         </button>
       </div>
 
+      <div className="search-bar source-search-bar">
+        <div className="search-input-wrapper">
+          <Search size={14} className="search-icon" />
+          <input
+            className="search-input"
+            value={sourceSearch}
+            onChange={(e) => setSourceSearch(e.target.value)}
+            placeholder="搜索信息源名称、ID、渠道、地址、关键词"
+          />
+          {sourceSearch && (
+            <button
+              type="button"
+              className="btn-icon"
+              title="清空搜索"
+              onClick={() => setSourceSearch("")}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <span className="text-muted small source-search-count">
+          {sourceSearch.trim() ? `匹配 ${visibleSources.length} / ${sources.length}` : `当前 ${visibleSources.length} 个`}
+        </span>
+      </div>
+
       <div className="card-list">
-        {sources.filter(s => sourceTab === "configured" ? s.is_configured : !s.is_configured).map((s) => (
+        {visibleSources.map((s) => (
           <article key={s.id} className="card-item card-item--compact">
             <div className="card-item-header">
               <div className="card-item-title">
@@ -142,6 +172,11 @@ export function SourcesPage() {
             </div>
           </article>
         ))}
+        {visibleSources.length === 0 && (
+          <div className="empty-state">
+            没有找到匹配的信息源
+          </div>
+        )}
       </div>
 
       {(showCreate || editing) && (
@@ -159,6 +194,28 @@ export function SourcesPage() {
       )}
     </div>
   );
+}
+
+function matchesSourceSearch(source: Source, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    source.id,
+    source.name,
+    source.description,
+    source.channel,
+    source.base_url,
+    source.api_endpoint,
+    source.homepage_url,
+    ...(source.default_keywords ?? []),
+    ...(source.default_categories ?? []),
+    ...(source.languages ?? []),
+    ...(source.country_focus ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return q.split(/\s+/).every((part) => haystack.includes(part));
 }
 
 // ── Source form ──────────────────────────────────────────────────────────────

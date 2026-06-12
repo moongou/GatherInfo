@@ -1,5 +1,6 @@
 import { ExternalLink, X } from "lucide-react";
 import type { CollectedItem, Source } from "../types";
+import { cleanItemTitle, getDisplayTitle } from "../utils/title";
 
 interface ItemDetailModalProps {
   item: CollectedItem;
@@ -10,6 +11,11 @@ interface ItemDetailModalProps {
 export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps) {
   const sourceName =
     sources.find((s) => s.id === item.source_id)?.name || item.source_id;
+  const hasTranslation = Boolean(item.title_zh || item.summary_zh || item.content_zh);
+  const displayTitle = getDisplayTitle(item.title_zh || item.title);
+  const originalTitle = cleanItemTitle(item.title);
+  const displaySummary = item.summary_zh || item.summary;
+  const displayContent = item.content_zh || item.content;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -21,7 +27,7 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
         <div className="reading-modal-header">
           <div>
             <h3 style={{ fontSize: "1.1rem", fontWeight: 700, lineHeight: 1.4 }}>
-              {item.title}
+              {displayTitle}
             </h3>
             <div
               className="reading-modal-meta"
@@ -36,6 +42,7 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
                 <span className="chip">来源: {sourceName}</span>
               )}
               {item.language && <span className="chip">{item.language}</span>}
+              {hasTranslation && <span className="chip chip--green">中文译文</span>}
               {item.category && (
                 <span className="chip chip--blue">{item.category}</span>
               )}
@@ -71,10 +78,10 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
 
         {/* Body */}
         <div className="reading-modal-body">
-          {item.summary && (
+          {displaySummary && (
             <div className="reading-summary">
               <strong>摘要</strong>
-              <p>{item.summary}</p>
+              <p>{displaySummary}</p>
             </div>
           )}
 
@@ -88,7 +95,7 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
           )}
 
           <div className="reading-content">
-            {(item as any).content ? (
+            {displayContent ? (
               <div
                 style={{
                   whiteSpace: "pre-wrap",
@@ -96,7 +103,7 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
                   lineHeight: 1.8,
                 }}
               >
-                {(item as any).content}
+                {displayContent}
               </div>
             ) : (
               <p
@@ -111,6 +118,17 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
               </p>
             )}
           </div>
+
+          {hasTranslation && (
+            <div className="reading-original">
+              <strong>原文</strong>
+              {originalTitle && originalTitle !== displayTitle && <h4>{originalTitle}</h4>}
+              {item.summary && item.summary !== displaySummary && <p>{item.summary}</p>}
+              {item.content && item.content !== displayContent && (
+                <div style={{ whiteSpace: "pre-wrap" }}>{item.content}</div>
+              )}
+            </div>
+          )}
 
           <div className="reading-modal-footer">
             <div className="text-muted small">

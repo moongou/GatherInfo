@@ -14,6 +14,14 @@ from app.models import ModelConfig
 logger = logging.getLogger(__name__)
 
 
+def openai_compatible_url(base_url: str, path: str) -> str:
+    base = base_url.rstrip("/")
+    path = path if path.startswith("/") else f"/{path}"
+    if base.endswith("/v1"):
+        return f"{base}{path}"
+    return f"{base}/v1{path}"
+
+
 async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
     """Call the LLM and return content, summary, tokens_used."""
     base_url = model.base_url or "http://localhost:11434"
@@ -28,6 +36,7 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
+            "think": False,
             "options": {
                 "temperature": model.temperature or 0.7,
                 "num_predict": model.max_tokens or 4096,
@@ -37,11 +46,11 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            full = data.get("message", {}).get("content", "")
+            msg = data.get("message", {})
+            full = msg.get("content") or msg.get("thinking") or ""
 
     elif model.provider in ("openai", "lmstudio", "custom", "cc_switch"):
-        base = base_url.rstrip("/")
-        url = f"{base}/v1/chat/completions"
+        url = openai_compatible_url(base_url, "/chat/completions")
         headers = {"Content-Type": "application/json"}
         if model.api_key:
             headers["Authorization"] = f"Bearer {model.api_key}"
@@ -67,6 +76,9 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
     parts = full.split("===SEPARATOR===")
     content = parts[0].strip() if parts else full
     summary = parts[1].strip() if len(parts) > 1 else auto_summary(content)
+
+    if len(content.strip()) < 100:
+        raise ValueError(f"LLM returned too little content: {content[:80]!r}")
 
     return {
         "content": content,
@@ -121,10 +133,10 @@ async def translate_item_context(
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            output = data.get("message", {}).get("content", "")
+            msg = data.get("message", {})
+            output = msg.get("content") or msg.get("thinking") or ""
     else:
-        base = base_url.rstrip("/")
-        url = base + "/v1/chat/completions"
+        url = openai_compatible_url(base_url, "/chat/completions")
         headers = {"Content-Type": "application/json"}
         if model.api_key:
             headers["Authorization"] = "Bearer " + model.api_key

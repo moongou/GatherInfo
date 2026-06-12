@@ -12,11 +12,12 @@ from app.collection_schemas import (
 )
 from app.database import get_db
 from app.models import (
-    Category, CollectedItem, CollectionRun, JobStatus,
+    Category, CollectedItem, CollectionRun, JobStatus, ModelConfig,
     SourceConfig, Tag, Topic,
 )
 
 from ._helpers import _item_tags
+from app.translation_service import item_translation_fields, translate_existing_items
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["items"])
@@ -192,23 +193,25 @@ def list_items(
     if tag:
         query = query.filter(CollectedItem.tags.any(Tag.id == tag))
     if q:
-        query = query.filter(
-            (CollectedItem.title.ilike(f"%{q}%")) |
-            (CollectedItem.content.ilike(f"%{q}%"))
+        needle = q.lower()
+        candidates = query.order_by(CollectedItem.collected_at.desc()).all()
+        filtered = [it for it in candidates if _matches_item_query(it, needle)]
+        total = len(filtered)
+        items = filtered[(page - 1) * page_size: page * page_size]
+    else:
+        total = query.count()
+        items = (
+            query.order_by(CollectedItem.collected_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
         )
-
-    total = query.count()
-    items = (
-        query.order_by(CollectedItem.collected_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
 
     return ItemListOut(
         items=[ItemOut(
             id=it.id, source_id=it.source_id,
             title=it.title, content=it.content, summary=it.summary, url=it.url,
+            **item_translation_fields(it),
             language=it.language, category=it.category, tags=_item_tags(it),
             entities=it.entities,
             quality_score=it.quality_score or 0,
@@ -218,6 +221,33 @@ def list_items(
         ) for it in items],
         total=total, page=page, page_size=page_size,
     )
+
+
+def _matches_item_query(item: CollectedItem, needle: str) -> bool:
+    trans = item_translation_fields(item)
+    haystack = " ".join([
+        item.title or "",
+        item.summary or "",
+        item.content or "",
+        trans.get("title_zh") or "",
+        trans.get("summary_zh") or "",
+        trans.get("content_zh") or "",
+    ]).lower()
+    return needle in haystack
+
+
+@router.post("/items/translate")
+async def translate_items(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    model = db.query(ModelConfig).filter(
+        ModelConfig.is_default == True,
+        ModelConfig.is_active == True,
+    ).first()
+    if not model:
+        raise HTTPException(status_code=400, detail="No active default model configured")
+    return await translate_existing_items(db, model, limit=limit)
 
 
 @router.get("/items/ids")

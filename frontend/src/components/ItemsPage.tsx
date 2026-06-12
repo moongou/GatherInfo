@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
-import { ExternalLink, BookOpenText } from "lucide-react";
+import { ExternalLink, BookOpenText, Languages } from "lucide-react";
 import {
   fetchItems, fetchTags, fetchSources, fetchTopics,
   fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems,
 } from "../api";
 import type { CollectedItem, ItemList, Tag, Source, Topic } from "../types";
+import { cleanItemTitle, getDisplayTitle } from "../utils/title";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { ItemFilterBar } from "./ItemFilterBar";
 import { ItemDetailModal } from "./ItemDetailModal";
@@ -303,11 +304,15 @@ export function ItemsPage() {
 
 function ItemCard({ item }: { item: CollectedItem }) {
   const [expanded, setExpanded] = useState(false);
+  const hasTranslation = Boolean(item.title_zh || item.summary_zh || item.content_zh);
+  const displayTitle = getDisplayTitle(item.title_zh || item.title);
+  const originalTitle = cleanItemTitle(item.title);
+  const displaySummary = item.summary_zh || item.summary;
   return (
     <article className="item-card">
       <div className="item-card-header">
         <h4 className="item-title" onClick={() => setExpanded(!expanded)}>
-          {item.title}
+          {displayTitle}
         </h4>
         <div className="item-card-meta">
           {item.url && (
@@ -315,6 +320,7 @@ function ItemCard({ item }: { item: CollectedItem }) {
               <ExternalLink size={12} />
             </a>
           )}
+          {hasTranslation && <span className="chip chip--green"><Languages size={12} /> 译文</span>}
           <span className="chip">{item.language ?? "?"}</span>
           {item.category && <span className="chip chip--blue">{item.category}</span>}
           {item.tags?.map((t) => (
@@ -324,8 +330,11 @@ function ItemCard({ item }: { item: CollectedItem }) {
       </div>
       {expanded && (
         <div className="item-card-body" id={`item-content-${item.id}`}>
-          {item.summary && <p className="text-muted">{item.summary}</p>}
-          {!item.summary && item.url && <p className="text-muted">URL: {item.url}</p>}
+          {displaySummary && <p className="text-muted">{displaySummary}</p>}
+          {hasTranslation && item.title_zh && originalTitle && originalTitle !== displayTitle && (
+            <p className="item-original-line">原文标题：{originalTitle}</p>
+          )}
+          {!displaySummary && item.url && <p className="text-muted">URL: {item.url}</p>}
           <div className="item-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="text-muted small">
               {item.collected_at && `采集: ${new Date(item.collected_at).toLocaleString("zh")}`}
