@@ -336,6 +336,7 @@ def search_items(
         items=[ItemOut(
             id=it.id, source_id=it.source_id, run_id=it.run_id,
             title=it.title, content=it.content, summary=it.summary, url=it.url,
+            **item_translation_fields(it),
             language=it.language, category=it.category, tags=_item_tags(it),
             entities=it.entities,
             quality_score=it.quality_score or 0,
@@ -353,6 +354,7 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
     return ItemOut(
         id=it.id, source_id=it.source_id, run_id=it.run_id,
         title=it.title, content=it.content, summary=it.summary, url=it.url,
+        **item_translation_fields(it),
         language=it.language, category=it.category, tags=_item_tags(it),
         entities=it.entities,
         quality_score=it.quality_score or 0,

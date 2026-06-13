@@ -330,9 +330,28 @@ function ItemCard({ item }: { item: CollectedItem }) {
       </div>
       {expanded && (
         <div className="item-card-body" id={`item-content-${item.id}`}>
-          {displaySummary && <p className="text-muted">{displaySummary}</p>}
-          {hasTranslation && item.title_zh && originalTitle && originalTitle !== displayTitle && (
-            <p className="item-original-line">原文标题：{originalTitle}</p>
+          {hasTranslation ? (
+            <>
+              {(item.summary_zh || item.content_zh) && (
+                <div className="item-translation-preview">
+                  <strong>中文译文</strong>
+                  <p className="text-muted">{item.summary_zh || item.content_zh}</p>
+                </div>
+              )}
+              {(originalTitle || item.summary || item.content) && (
+                <div className="item-original-preview">
+                  <strong>源文件内容</strong>
+                  {originalTitle && originalTitle !== displayTitle && (
+                    <p className="item-original-line">原文标题：{originalTitle}</p>
+                  )}
+                  {(item.summary || item.content) && (
+                    <p className="text-muted">{item.summary || item.content}</p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            displaySummary && <p className="text-muted">{displaySummary}</p>
           )}
           {!displaySummary && item.url && <p className="text-muted">URL: {item.url}</p>}
           <div className="item-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

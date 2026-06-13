@@ -266,6 +266,9 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 .item-card-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-light); }
 .item-card-body p { font-size: 0.82rem; line-height: 1.6; color: var(--ink-muted); }
 .item-card-footer { margin-top: 8px; }
+.item-translation-preview, .item-original-preview { margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line-light); border-radius: var(--radius); background: var(--surface-elevated); }
+.item-translation-preview { border-left: 3px solid var(--green); }
+.item-original-preview strong, .item-translation-preview strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 0.76rem; }
 .chip--green { display: inline-flex; align-items: center; gap: 3px; background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); color: var(--green); }
 .item-original-line { margin-top: 6px; font-size: 0.76rem !important; color: var(--ink-muted); }
 
@@ -418,6 +421,9 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 .reading-url { margin-bottom: 16px; }
 .reading-url strong { font-size: 0.78rem; color: var(--ink-muted); display: block; margin-bottom: 4px; }
 .reading-url a { font-size: 0.82rem; word-break: break-all; display: inline-flex; align-items: center; gap: 4px; }
+.reading-section { margin-bottom: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-card); }
+.reading-section > strong { display: block; margin-bottom: 10px; color: var(--ink); font-size: 0.82rem; }
+.reading-section--translation { border-left: 3px solid var(--green); }
 .reading-content { font-size: 0.9rem; line-height: 1.8; padding: 16px 0; min-height: 100px; }
 .reading-original { margin-top: 18px; padding: 14px 16px; background: var(--surface-elevated); border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink-muted); font-size: 0.82rem; line-height: 1.7; }
 .reading-original strong { display: block; margin-bottom: 8px; color: var(--ink); font-size: 0.78rem; }

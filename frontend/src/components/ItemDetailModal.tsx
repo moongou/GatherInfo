@@ -14,8 +14,12 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
   const hasTranslation = Boolean(item.title_zh || item.summary_zh || item.content_zh);
   const displayTitle = getDisplayTitle(item.title_zh || item.title);
   const originalTitle = cleanItemTitle(item.title);
-  const displaySummary = item.summary_zh || item.summary;
-  const displayContent = item.content_zh || item.content;
+  const translatedSummary = item.summary_zh || "";
+  const translatedContent = item.content_zh || "";
+  const originalSummary = item.summary || "";
+  const originalContent = item.content || "";
+  const displaySummary = hasTranslation ? translatedSummary : originalSummary;
+  const displayContent = hasTranslation ? translatedContent : originalContent;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -78,11 +82,32 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
 
         {/* Body */}
         <div className="reading-modal-body">
-          {displaySummary && (
-            <div className="reading-summary">
-              <strong>摘要</strong>
-              <p>{displaySummary}</p>
-            </div>
+          {hasTranslation ? (
+            <section className="reading-section reading-section--translation">
+              <strong>中文译文</strong>
+              {translatedSummary && (
+                <div className="reading-summary">
+                  <strong>摘要</strong>
+                  <p>{translatedSummary}</p>
+                </div>
+              )}
+              {translatedContent ? (
+                <div className="reading-content">
+                  <div style={{ whiteSpace: "pre-wrap", fontSize: "0.9rem", lineHeight: 1.8 }}>
+                    {translatedContent}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-muted" style={{ padding: 12 }}>暂无正文译文，当前仅显示标题或摘要译文。</p>
+              )}
+            </section>
+          ) : (
+            displaySummary && (
+              <div className="reading-summary">
+                <strong>摘要</strong>
+                <p>{displaySummary}</p>
+              </div>
+            )
           )}
 
           {item.url && (
@@ -94,38 +119,42 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
             </div>
           )}
 
-          <div className="reading-content">
-            {displayContent ? (
-              <div
-                style={{
-                  whiteSpace: "pre-wrap",
-                  fontSize: "0.9rem",
-                  lineHeight: 1.8,
-                }}
-              >
-                {displayContent}
-              </div>
-            ) : (
-              <p
-                className="text-muted"
-                style={{
-                  fontStyle: "italic",
-                  padding: 20,
-                  textAlign: "center",
-                }}
-              >
-                暂无详细内容，当前仅显示摘要信息。
-              </p>
-            )}
-          </div>
-
           {hasTranslation && (
-            <div className="reading-original">
-              <strong>原文</strong>
+            <section className="reading-section reading-original">
+              <strong>源文件内容</strong>
               {originalTitle && originalTitle !== displayTitle && <h4>{originalTitle}</h4>}
-              {item.summary && item.summary !== displaySummary && <p>{item.summary}</p>}
-              {item.content && item.content !== displayContent && (
-                <div style={{ whiteSpace: "pre-wrap" }}>{item.content}</div>
+              {originalSummary && <p>{originalSummary}</p>}
+              {originalContent ? (
+                <div style={{ whiteSpace: "pre-wrap" }}>{originalContent}</div>
+              ) : (
+                <p className="text-muted">暂无源文件正文。</p>
+              )}
+            </section>
+          )}
+
+          {!hasTranslation && (
+            <div className="reading-content">
+              {displayContent ? (
+                <div
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    fontSize: "0.9rem",
+                    lineHeight: 1.8,
+                  }}
+                >
+                  {displayContent}
+                </div>
+              ) : (
+                <p
+                  className="text-muted"
+                  style={{
+                    fontStyle: "italic",
+                    padding: 20,
+                    textAlign: "center",
+                  }}
+                >
+                  暂无详细内容，当前仅显示摘要信息。
+                </p>
               )}
             </div>
           )}

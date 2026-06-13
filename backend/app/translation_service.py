@@ -145,6 +145,9 @@ async def translate_existing_items(
 
 
 async def _translate_records(model: ModelConfig, records: list[dict[str, str]]) -> list[dict[str, str]]:
+    if model.provider == "web_fallback":
+        return await _translate_records_with_web_fallback(records)
+
     prompt = (
         "请把下面 JSON 数组中的英文或其他非中文信息翻译成简体中文。"
         "只返回 JSON 数组，不要解释，不要 Markdown。"
@@ -152,11 +155,17 @@ async def _translate_records(model: ModelConfig, records: list[dict[str, str]]) 
         "如果原字段为空，对应译文字段也返回空字符串。\n\n"
         f"{json.dumps(records, ensure_ascii=False)}"
     )
-    output = await _call_translation_model(model, prompt)
-    parsed = _parse_json_array(output)
-    if not isinstance(parsed, list):
-        raise ValueError("Translation model did not return a JSON array")
-    return [row for row in parsed if isinstance(row, dict)]
+    try:
+        output = await _call_translation_model(model, prompt)
+        parsed = _parse_json_array(output)
+        if not isinstance(parsed, list):
+            raise ValueError("Translation model did not return a JSON array")
+        rows = [row for row in parsed if isinstance(row, dict)]
+        if rows:
+            return rows
+    except Exception as exc:
+        logger.warning("Model translation failed, using web fallback: %s", exc)
+    return await _translate_records_with_web_fallback(records)
 
 
 async def _call_translation_model(model: ModelConfig, prompt: str) -> str:
@@ -217,6 +226,58 @@ def _normalize_translation(row: dict[str, Any]) -> dict[str, str]:
         "content_zh": _clean(row.get("content_zh")) or _clean(row.get("content")) or "",
         "status": "translated",
     }
+
+
+async def _translate_records_with_web_fallback(records: list[dict[str, str]]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    async with httpx.AsyncClient(timeout=60) as client:
+        for record in records:
+            rows.append({
+                "id": str(record.get("id", "")),
+                "title_zh": await _translate_text_with_google(client, record.get("title", "")),
+                "summary_zh": await _translate_text_with_google(client, record.get("summary", "")),
+                "content_zh": await _translate_text_with_google(client, record.get("content", "")),
+            })
+    return rows
+
+
+async def _translate_text_with_google(client: httpx.AsyncClient, text: str | None) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    chunks = _split_text(value, 1400)
+    translated: list[str] = []
+    for chunk in chunks:
+        resp = await client.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "auto", "tl": "zh-CN", "dt": "t", "q": chunk},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        translated.append("".join(part[0] for part in (data[0] or []) if part and part[0]))
+    return "\n".join(part for part in translated if part).strip()
+
+
+def _split_text(text: str, max_len: int) -> list[str]:
+    if len(text) <= max_len:
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for piece in re.split(r"(\n+|(?<=[.!?。！？])\s+)", text):
+        if not piece:
+            continue
+        if len(current) + len(piece) <= max_len:
+            current += piece
+            continue
+        if current.strip():
+            chunks.append(current.strip())
+        current = piece
+        while len(current) > max_len:
+            chunks.append(current[:max_len].strip())
+            current = current[max_len:]
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks
 
 
 def _clean(value: Any) -> str | None:
