@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useState, Suspense, lazy } from "react";
+import { useEffect, useState, Suspense, lazy } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History,
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
 import type { DashboardData } from "./types";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-// ── Lazy-loaded page components (code-split per view) ──────────────────
-
+// Lazy-loaded page components (code-split per view)
 const DashboardPage = lazy(() => import("./components/DashboardPage").then(m => ({ default: m.DashboardPage })));
+const IntelligenceHomePage = lazy(() => import("./components/IntelligenceHomePage").then(m => ({ default: m.IntelligenceHomePage })));
 const TopicsPage = lazy(() => import("./components/TopicsPage").then(m => ({ default: m.TopicsPage })));
 const SourcesPage = lazy(() => import("./components/SourcesPage").then(m => ({ default: m.SourcesPage })));
 const ItemsPage = lazy(() => import("./components/ItemsPage").then(m => ({ default: m.ItemsPage })));
@@ -22,8 +22,6 @@ const CategoriesPage = lazy(() => import("./components/CategoriesPage").then(m =
 const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ default: m.ReportsPage })));
 const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
 
-// ── Loading fallback ───────────────────────────────────────────────────
-
 function PageLoader() {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0" }}>
@@ -35,7 +33,7 @@ function PageLoader() {
   );
 }
 
-type ViewId = "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings" | "notifications";
+type ViewId = "home" | "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -44,6 +42,7 @@ interface ViewDef {
 }
 
 const views: ViewDef[] = [
+  { id: "home", label: "情报主页", icon: Newspaper },
   { id: "dashboard", label: "仪表盘", icon: LayoutDashboard },
   { id: "categories", label: "采集类别", icon: FolderTree },
   { id: "topics", label: "主题管理", icon: BarChart3 },
@@ -58,7 +57,6 @@ const views: ViewDef[] = [
   { id: "settings", label: "系统配置", icon: Settings },
 ];
 
-/** Time-of-day greeting in Chinese */
 function greeting(): string {
   const h = new Date().getHours();
   if (h < 6) return "夜深了";
@@ -67,31 +65,24 @@ function greeting(): string {
   return "晚上好";
 }
 
-/** Radar-scan logo — 3 concentric arcs + a pulse dot, clean line-art style */
 function AppLogo() {
   return (
     <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Radar arcs — opening toward top-right */}
       <path d="M20 4 A16 16 0 0 1 35.3 12.7" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" opacity="0.9" />
       <path d="M20 9 A11 11 0 0 1 30 15" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" opacity="0.65" />
       <path d="M20 14 A6 6 0 0 1 24.5 17.5" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
-      {/* Pulse dot at leading edge */}
       <circle cx="35.3" cy="12.7" r="2.5" fill="#22c55e" opacity="0.9">
         <animate attributeName="opacity" values="0.9;0.3;0.9" dur="2s" repeatCount="indefinite" />
       </circle>
-      {/* Subtle center dot */}
       <circle cx="20" cy="20" r="2" fill="#3b82f6" opacity="0.5" />
     </svg>
   );
 }
 
 export function App() {
-  const [view, setView] = useState<ViewId>("dashboard");
+  const [view, setView] = useState<ViewId>("home");
   const [dashData, setDashData] = useState<DashboardData | null>(null);
 
-  const activeDef = useMemo(() => views.find((v) => v.id === view) ?? views[0], [view]);
-
-  // Fetch dashboard summary for the dynamic greeting
   useEffect(() => {
     let cancelled = false;
     fetchDashboard().then((d) => { if (!cancelled) setDashData(d); }).catch(() => {});
@@ -144,22 +135,23 @@ export function App() {
           </div>
         </header>
         <section className="view-frame">
-           <ErrorBoundary key={view}>
-             <Suspense fallback={<PageLoader />}>
-               {view === "dashboard" && <DashboardPage />}
-               {view === "categories" && <CategoriesPage />}
-               {view === "topics" && <TopicsPage />}
-               {view === "sources" && <SourcesPage />}
-               {view === "items" && <ItemsPage />}
-               {view === "tags" && <TagsPage />}
-               {view === "reports" && <ReportsPage />}
-               {view === "models" && <ModelConfigPage />}
-               {view === "history" && <HistoryPage />}
-               {view === "notifications" && <NotificationsPage />}
-               {view === "settings" && <SettingsPage />}
-               {view === "schedules" && <SchedulesPage />}
-             </Suspense>
-           </ErrorBoundary>
+          <ErrorBoundary key={view}>
+            <Suspense fallback={<PageLoader />}>
+              {view === "home" && <IntelligenceHomePage />}
+              {view === "dashboard" && <DashboardPage />}
+              {view === "categories" && <CategoriesPage />}
+              {view === "topics" && <TopicsPage />}
+              {view === "sources" && <SourcesPage />}
+              {view === "items" && <ItemsPage />}
+              {view === "tags" && <TagsPage />}
+              {view === "reports" && <ReportsPage />}
+              {view === "models" && <ModelConfigPage />}
+              {view === "history" && <HistoryPage />}
+              {view === "notifications" && <NotificationsPage />}
+              {view === "settings" && <SettingsPage />}
+              {view === "schedules" && <SchedulesPage />}
+            </Suspense>
+          </ErrorBoundary>
         </section>
       </main>
     </div>

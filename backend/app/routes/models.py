@@ -22,6 +22,14 @@ from app.models import ModelConfig
 router = APIRouter(prefix="/api/v1", tags=["models"])
 
 
+def _openai_compatible_url(base_url: str, path: str) -> str:
+    base = base_url.rstrip("/")
+    path = path if path.startswith("/") else f"/{path}"
+    if base.endswith("/v1"):
+        return f"{base}{path}"
+    return f"{base}/v1{path}"
+
+
 
 @router.get("/models", response_model=list[ModelConfigOut])
 def list_models(db: Session = Depends(get_db)):
@@ -117,7 +125,7 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
                 message = f"Ollama OK. Found {len(avail)} models."
 
             try:
-                async with httpx.AsyncClient(timeout=15) as client:
+                async with httpx.AsyncClient(timeout=120) as client:
                     r = await client.post(f"{base}/api/chat", json={
                         "model": test_model,
                         "messages": [{"role": "user", "content": "Reply exactly: OK"}],
@@ -142,11 +150,11 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
                 )
         else:
             # OpenAI-compatible test
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=120) as client:
                 headers = {"Content-Type": "application/json"}
                 if m.api_key:
                     headers["Authorization"] = f"Bearer {m.api_key}"
-                url = f"{base}/chat/completions"
+                url = _openai_compatible_url(base, "/chat/completions")
                 r = await client.post(url, json={
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Reply exactly: OK"}],
@@ -197,7 +205,7 @@ async def list_available_models(model_id: str, db: Session = Depends(get_db)):
                 headers = {}
                 if m.api_key:
                     headers["Authorization"] = f"Bearer {m.api_key}"
-                r = await client.get(f"{base}/models", headers=headers)
+                r = await client.get(_openai_compatible_url(base, "/models"), headers=headers)
                 raw = r.json()
                 models = [mod.get("id", "") for mod in raw.get("data", [])]
                 return ListModelsResult(

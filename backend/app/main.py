@@ -177,7 +177,6 @@ def _startup_diagnostics():
                     _default_search_tools, _default_keyword_tags, _default_description_prompt,
                     _DEFAULT_CATEGORIES,
                 )
-                cat_data = _DEFAULT_CATEGORIES
                 from app.models import Category
                 from app.models import Topic, SearchToolConfig
                 for cfg in _default_sources():
@@ -198,11 +197,6 @@ def _startup_diagnostics():
                 for cfg in _default_search_tools():
                     if not db.query(SearchToolConfig).filter(SearchToolConfig.id == cfg["id"]).first():
                         db.add(SearchToolConfig(**cfg))
-                # Always seed categories (independent of other critical config)
-                from app.models import Category
-                for cat in cat_data:
-                    if not db.query(Category).filter(Category.id == cat["id"]).first():
-                        db.add(Category(**cat))
                 db.commit()
                 logger.info("Default configuration seeded.")
             except Exception as exc:

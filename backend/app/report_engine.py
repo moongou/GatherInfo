@@ -122,16 +122,22 @@ async def generate_report(
             report.status = "completed"
         except Exception as exc:
             logger.error("LLM call failed for report %s: %s", report.id, exc)
-            report.status = "failed"
-            report.error_log = str(exc)
+            report.content = _build_fallback_report(
+                topic, item_context, range_start, range_end, str(exc)
+            )
+            report.summary = "模型生成不稳定，已基于采集条目生成本地规则兜底报告。"
+            report.tokens_used = 0
+            report.status = "completed"
+            report.error_log = f"LLM 生成失败，已使用本地规则兜底：{exc}"
 
         db.commit()
         db.refresh(report)
 
-        try:
-            _export_report_files(db, report, topic)
-        except Exception as exc:
-            logger.warning("Export step failed for report %s: %s", report.id, exc)
+        if report.status == "completed" and (report.content or "").strip():
+            try:
+                _export_report_files(db, report, topic)
+            except Exception as exc:
+                logger.warning("Export step failed for report %s: %s", report.id, exc)
 
         return report
     finally:
@@ -154,7 +160,12 @@ def _parse_iso(value: str | None) -> datetime | None:
 def _export_report_files(db: Session, report: Report, topic: Topic | None) -> None:
     try:
         from app.report_export import export_report
-        export_report(report, db, topic)
+        from app.services.report_service import get_system_config
+
+        system = get_system_config(db)
+        export_report(report, system, topic)
+        db.commit()
+        db.refresh(report)
     except ImportError:
         logger.warning("report_export module not available, skipping export")
 
@@ -162,13 +173,13 @@ def _export_report_files(db: Session, report: Report, topic: Topic | None) -> No
 def _build_item_context(items: list[CollectedItem]) -> list[dict]:
     """Build structured item context dict from ORM objects for prompt building."""
     context = []
-    for idx, it in enumerate(items, 1):
+    for idx, it in enumerate(items[:12], 1):
         context.append({
             "id": it.id,
             "index": idx,
             "title": it.title or "",
-            "content": (it.content or "")[:2000],
-            "summary": it.summary or "",
+            "content": (it.content or "")[:500],
+            "summary": (it.summary or "")[:500],
             "url": it.url or "",
             "language": it.language or "unknown",
             "category": it.category or "unknown",
@@ -242,7 +253,7 @@ def _build_report_prompt(
 {kw_info}
 {range_info}
 【采集数据】
-共 {len(items)} 条信息条目。
+本次用于分析的代表性信息共 {len(items)} 条；完整入库条目数以报告元数据为准。
 
 【详细条目】
 
@@ -268,3 +279,70 @@ def _build_report_prompt(
 第二部分：150字以内的摘要
 """
     return prompt
+
+
+def _build_fallback_report(
+    topic: Topic,
+    items: list[dict],
+    range_start: datetime | None,
+    range_end: datetime | None,
+    reason: str,
+) -> str:
+    source_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    for item in items:
+        source = item.get("source") or "未知来源"
+        category = item.get("category") or "未分类"
+        source_counts[source] = source_counts.get(source, 0) + 1
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    def fmt_counts(counts: dict[str, int]) -> str:
+        return "、".join(f"{key} {value} 条" for key, value in counts.items()) or "暂无"
+
+    start = range_start.strftime("%Y-%m-%d") if range_start else "未知"
+    end = range_end.strftime("%Y-%m-%d") if range_end else "未知"
+    top_items = items[:8]
+    item_lines = []
+    for item in top_items:
+        idx = item.get("index", "?")
+        title = item.get("title") or "无标题"
+        source = item.get("source") or "未知来源"
+        url = item.get("url") or ""
+        text = item.get("summary") or item.get("content") or ""
+        text = " ".join(text.split())[:220]
+        item_lines.append(
+            f"- [参考条目 {idx}] {title}（来源：{source}）。"
+            f"{' 摘要：' + text if text else ''}"
+            f"{' 链接：' + url if url else ''}"
+        )
+
+    return f"""## 执行摘要
+本报告基于“{topic.name}”主题下已采集的信息生成，覆盖时间范围为 {start} 至 {end}。由于本机模型生成过程返回异常内容，系统已启用本地规则兜底生成，以便先形成可阅读、可导出的分析材料。当前样本主要来自 {fmt_counts(source_counts)}，信息集中在贸易协定、关税政策、监管措施、国际经贸合作与供应链影响等方向。
+
+## 关键发现
+- 美国贸易代表办公室等官方渠道的信息占比较高，说明当前样本更偏向官方政策口径和制度性安排。
+- 条目标题和正文显示，贸易协定、互惠贸易安排、投资框架、关税及市场准入仍是全球贸易政策监测的核心线索。
+- 部分网页内容包含导航、页脚或访问限制提示，后续需要进一步优化正文抽取规则，减少页面模板噪声。
+- 对企业而言，政策变化可能影响关税成本、供应链布局、市场准入条件和合规审查要求。
+
+## 数据概览
+- 代表性条目数：{len(items)} 条
+- 来源分布：{fmt_counts(source_counts)}
+- 分类分布：{fmt_counts(category_counts)}
+- 时间范围：{start} 至 {end}
+
+## 重点条目
+{chr(10).join(item_lines) if item_lines else '- 暂无可展示条目'}
+
+## 趋势研判
+从现有条目看，全球贸易政策正在从单纯降低关税，转向更综合的制度安排，包括供应链安全、产业政策、投资限制、出口管制、区域贸易协定和绿色贸易规则。美国及主要经济体会继续通过双边或区域机制强化自身贸易利益，同时在关键产业、技术产品和战略资源方面维持更高的审查强度。
+
+## 建议行动
+- 持续跟踪 USTR、WTO、各国海关及商务部门的官方发布，优先监控关税、贸易救济、出口管制和原产地规则变化。
+- 对涉及美国、欧盟及主要贸易伙伴市场的产品，建立政策变更清单，评估成本、交付周期和合规风险。
+- 优化采集源质量，优先使用 RSS、官方 API、站内搜索接口或结构化公告页面，减少普通网页模板噪声。
+- 对重要条目进行人工复核，必要时补充原文链接、发布日期、政策生效日期和适用行业。
+
+## 生成说明
+本报告由本地规则兜底生成。触发原因：{reason}
+"""

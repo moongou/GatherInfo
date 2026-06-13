@@ -6,6 +6,7 @@ Flow:
     → dedup → persist (with topic_id) → auto-tag → return stats
 """
 import asyncio
+import logging
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
@@ -16,6 +17,8 @@ from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
     JobStatus, ModelConfig, SourceConfig, Tag, Topic,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -73,13 +76,12 @@ class CollectionEngine:
                                  status=JobStatus.FAILED, items=[], error_log=[str(exc)])
 
         result = await connector.execute(run, keywords)
-        # Translate non-Chinese items to Chinese before storing
+        # Add Chinese translations for non-Chinese items before storing.
+        # The original title/content are preserved; translations live in raw_metadata.
         if model and result.items:
             try:
-                from app.llm_client import call_llm as _call_llm
-                translated = await self._translate_fetch_items(result.items, model)
-                if translated:
-                    result.items = translated
+                from app.translation_service import translate_fetch_items_to_metadata
+                await translate_fetch_items_to_metadata(result.items, model)
             except Exception as exc:
                 logger.warning("Item translation failed (non-blocking): %s", exc)
         self._persist_items(result.items, source.id, run.id, topic_id, window_start, keywords)
@@ -267,74 +269,9 @@ class CollectionEngine:
         return self.db.query(SourceConfig).filter(SourceConfig.is_active == True).all()
 
     async def _translate_fetch_items(self, items: list[FetchItem], model: ModelConfig) -> list[FetchItem] | None:
-        """Translate non-Chinese FetchItem titles and content to Chinese in-place."""
-        non_zh = [it for it in items if it.language and it.language not in ('zh', 'zh-CN', 'cn')]
-        if not non_zh or len(non_zh) > 30:
-            return None
-
-        lines = []
-        for it in non_zh:
-            lines.append("[ID:" + str(id(it)) + "] TITLE: " + (it.title or ""))
-            if it.summary:
-                lines.append("SUMMARY: " + it.summary)
-            if it.content:
-                lines.append("CONTENT: " + it.content[:800])
-            lines.append("---")
-        text = "\n".join(lines)
-        prompt = (
-            "Translate each item below into Chinese.\n"
-            + "Keep [ID:xxx] markers unchanged.\n"
-            + "Each item is separated by ---.\n\n"
-            + "Original:\n" + text + "\n\n"
-            + "Translations:"
-        )
-
-        import httpx
-        base_url = model.base_url or "http://localhost:11434"
-        model_name = model.model_name or ""
-
-        if model.provider == "ollama":
-            url = base_url.rstrip("/") + "/api/chat"
-            payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "options": {"temperature": 0.3, "num_predict": 4096},
-            }
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(url, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                output = data.get("message", {}).get("content", "")
-        else:
-            base = base_url.rstrip("/")
-            url = base + "/v1/chat/completions"
-            headers = {"Content-Type": "application/json"}
-            if model.api_key:
-                headers["Authorization"] = "Bearer " + model.api_key
-            payload = {
-                "model": model_name, "temperature": 0.3, "max_tokens": 4096,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-                output = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-        blocks = output.split("---")
-        for i, fi in enumerate(non_zh):
-            block = blocks[i] if i < len(blocks) else ""
-            for line in block.split("\n"):
-                line = line.strip()
-                if line.startswith("TITLE:"):
-                    fi.title = line[6:].strip()
-                elif line.startswith("SUMMARY:"):
-                    fi.summary = line[8:].strip()
-                elif line.startswith("CONTENT:"):
-                    fi.content = line[8:].strip()
-            fi.language = "zh"
-
+        """Backward-compatible wrapper: attach translations without replacing originals."""
+        from app.translation_service import translate_fetch_items_to_metadata
+        await translate_fetch_items_to_metadata(items, model)
         return items
 
     def _persist_items(self, items: list[FetchItem], source_id: str, run_id: str,
@@ -353,18 +290,25 @@ class CollectionEngine:
             # Keyword relevance filtering: skip items that don't match the keyword combination
             # Keywords work together as a topic definition, not individually.
             if keywords:
-                text = f"{fi.title} {fi.content or ''} {fi.summary or ''}"
+                metadata_text = ""
+                if isinstance(fi.raw_metadata, dict):
+                    metadata_text = " ".join(str(v) for v in fi.raw_metadata.values() if v)
+                text = f"{fi.title} {fi.content or ''} {fi.summary or ''} {metadata_text}"
                 matched_kws = [kw for kw in keywords if kw and kw.lower() in text.lower()]
                 total_kw = len([kw for kw in keywords if kw])
-                required = max(1, 2 if total_kw >= 3 else total_kw)
-                if len(matched_kws) < required:
+                if len(matched_kws) < 1:
                     continue
             item_id = fi.item_id(source_id)
+            published_at = _coerce_datetime(fi.published_at)
             try:
                 existing = self.db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
                 if existing:
                     if fi.content and fi.content != existing.content:
                         existing.content = fi.content
+                    if fi.summary and fi.summary != existing.summary:
+                        existing.summary = fi.summary
+                    if published_at and not existing.published_at:
+                        existing.published_at = published_at
                     if topic_id and not existing.topic_id:
                         existing.topic_id = topic_id
                     existing.updated_at = utc_now()
@@ -379,7 +323,7 @@ class CollectionEngine:
                         entities=fi.entities,
                         quality_score=fi.quality_score,
                         relevance_score=fi.relevance_score,
-                        published_at=fi.published_at,
+                        published_at=published_at,
                         collected_at=utc_now(),
                         raw_metadata=fi.raw_metadata,
                         status=ItemStatus.RAW,
@@ -397,3 +341,16 @@ class CollectionEngine:
 def _hash(s: str) -> str:
     import hashlib
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def _coerce_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None

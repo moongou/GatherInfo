@@ -98,8 +98,6 @@ export function TopicsPage() {
       const defaultModel = models.find((m) => m.is_default);
       const report = await generateReport(topicId, {
         modelId: defaultModel?.id,
-        // Auto-associate the latest collection batch when available.
-        collectionRunId: topic?.last_collection_run_id ?? undefined,
       });
       alert(`报告已生成: ${report.title}${report.status === "completed" ? "" : " (" + report.status + ")"}`);
     } catch (e) {

@@ -30,7 +30,7 @@ class WebScrapeCollector(BaseCollector):
 
         cfg = self.config
         ac = cfg.auth_config or {}
-        urls = _build_urls(cfg.base_url, ac.get("max_pages", 5))
+        urls = _build_urls(cfg.base_url, ac.get("max_pages", 1))
 
         items: list[FetchItem] = []
         errors: list[str] = []
@@ -40,6 +40,7 @@ class WebScrapeCollector(BaseCollector):
             timeout=cfg.timeout_seconds,
             headers=_scrape_headers(),
             follow_redirects=True,
+            verify=ac.get("verify_ssl", True),
         ) as client:
             for url in urls:
                 if len(items) >= max_items:
@@ -54,15 +55,32 @@ class WebScrapeCollector(BaseCollector):
                         if len(items) >= max_items:
                             break
 
-                        title_el = el.select_one("a[href], h2 a, h3 a, .title a, h1, h2, h3, .title")
+                        title_el = el if el.name == "a" and el.get("href") else el.select_one(
+                            "a[href], h2 a, h3 a, .title a, h1, h2, h3, .title")
                         title = title_el.get_text(strip=True) if title_el else ""
                         if not title or len(title) < 4:
                             continue
 
-                        link_el = el.select_one("a[href]")
+                        link_el = el if el.name == "a" and el.get("href") else el.select_one("a[href]")
                         href = link_el.get("href", "") if link_el else ""
                         if href and not href.startswith("http"):
                             href = urljoin(cfg.base_url, href)
+
+                        title_include = ac.get("title_include_pattern")
+                        if title_include and not re.search(title_include, title):
+                            continue
+
+                        title_exclude = ac.get("title_exclude_pattern")
+                        if title_exclude and re.search(title_exclude, title):
+                            continue
+
+                        href_include = ac.get("href_include_pattern")
+                        if href_include and not re.search(href_include, href or ""):
+                            continue
+
+                        href_exclude = ac.get("href_exclude_pattern")
+                        if href_exclude and re.search(href_exclude, href or ""):
+                            continue
 
                         if href in seen:
                             continue
@@ -73,9 +91,10 @@ class WebScrapeCollector(BaseCollector):
                         if date_el:
                             dt_text = date_el.get("datetime", "") or date_el.get_text(strip=True)
                             published = _parse_date(dt_text)
-
-                        if not _matches(title, "", keywords):
-                            continue
+                        if not published:
+                            published = _parse_date(el.get_text(" ", strip=True))
+                        if not published and el.name == "a" and el.parent:
+                            published = _parse_date(el.parent.get_text(" ", strip=True))
 
                         content = ""
                         if href and ac.get("fetch_detail", True):
@@ -95,6 +114,9 @@ class WebScrapeCollector(BaseCollector):
                                     1.0 / cfg.rate_limit_rps if cfg.rate_limit_rps else 1.0)
                             except Exception:
                                 pass
+
+                        if not _matches(title, content, keywords):
+                            continue
 
                         items.append(FetchItem(
                             title=title, content=content, url=href,
@@ -170,7 +192,11 @@ _CN_PATTERNS = [
 def _parse_date(text: str) -> str | None:
     if not text:
         return None
-    for pat, _ in _CN_PATTERNS:
+    patterns = [
+        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日",
+    ]
+    for pat in patterns:
         m = re.search(pat, text)
         if m:
             try:
