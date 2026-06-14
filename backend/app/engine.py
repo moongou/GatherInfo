@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
+from app.content_parser import parse_fetch_item
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
     JobStatus, ModelConfig, SourceConfig, Tag, Topic,
@@ -84,7 +85,9 @@ class CollectionEngine:
                 await translate_fetch_items_to_metadata(result.items, model)
             except Exception as exc:
                 logger.warning("Item translation failed (non-blocking): %s", exc)
-        self._persist_items(result.items, source.id, run.id, topic_id, window_start, keywords)
+        self._persist_items(
+            result.items, source.id, run.id, topic_id, window_start, window_end, keywords
+        )
         self._update_source(source, len(result.items))
         self.db.commit()
         return result
@@ -276,16 +279,15 @@ class CollectionEngine:
 
     def _persist_items(self, items: list[FetchItem], source_id: str, run_id: str,
                        topic_id: str | None = None, window_start: "datetime | None" = None,
+                       window_end: "datetime | None" = None,
                        keywords: list[str] | None = None):
         for fi in items:
-            # Skip items whose known publication date is older than the window.
-            # Items without a published_at are always kept (date unknown).
-            if window_start is not None and fi.published_at is not None:
-                pub = fi.published_at
-                if pub.tzinfo is None:
-                    pub = pub.replace(tzinfo=timezone.utc)
-                if pub < window_start:
-                    continue
+            parsed = parse_fetch_item(fi)
+            if not parsed.is_meaningful:
+                continue
+
+            pub = _coerce_datetime(fi.published_at)
+            is_out_of_range = _is_out_of_range(pub, window_start, window_end)
 
             # Keyword relevance filtering: skip items that don't match the keyword combination
             # Keywords work together as a topic definition, not individually.
@@ -296,39 +298,44 @@ class CollectionEngine:
                 text = f"{fi.title} {fi.content or ''} {fi.summary or ''} {metadata_text}"
                 matched_kws = [kw for kw in keywords if kw and kw.lower() in text.lower()]
                 total_kw = len([kw for kw in keywords if kw])
-                if len(matched_kws) < 1:
+                required_matches = 2 if total_kw >= 3 else 1
+                if len(matched_kws) < required_matches:
                     continue
             item_id = fi.item_id(source_id)
-            published_at = _coerce_datetime(fi.published_at)
             try:
                 existing = self.db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
                 if existing:
-                    if fi.content and fi.content != existing.content:
-                        existing.content = fi.content
-                    if fi.summary and fi.summary != existing.summary:
-                        existing.summary = fi.summary
-                    if published_at and not existing.published_at:
-                        existing.published_at = published_at
+                    if parsed.content and parsed.content != existing.content:
+                        existing.content = parsed.content
+                    if parsed.summary and parsed.summary != existing.summary:
+                        existing.summary = parsed.summary
+                    if pub and not existing.published_at:
+                        existing.published_at = pub
                     if topic_id and not existing.topic_id:
                         existing.topic_id = topic_id
+                    existing.entities = _merge_json(existing.entities, parsed.entities)
+                    existing.raw_metadata = _merge_json(existing.raw_metadata, parsed.metadata)
                     existing.updated_at = utc_now()
                 else:
                     self.db.add(CollectedItem(
                         id=item_id, source_id=source_id, run_id=run_id,
                         topic_id=topic_id,
-                        title=fi.title, content=fi.content,
-                        content_hash=_hash(fi.content or fi.title),
-                        summary=fi.summary, url=fi.url,
+                        title=fi.title.strip(), content=parsed.content,
+                        content_hash=_hash(parsed.content or fi.title),
+                        summary=parsed.summary, url=fi.url,
                         language=fi.language, category=fi.category,
-                        entities=fi.entities,
+                        entities=parsed.entities,
                         quality_score=fi.quality_score,
                         relevance_score=fi.relevance_score,
-                        published_at=published_at,
+                        published_at=pub,
                         collected_at=utc_now(),
-                        raw_metadata=fi.raw_metadata,
+                        raw_metadata=parsed.metadata,
                         status=ItemStatus.RAW,
                     ))
                 self.db.flush()
+                if is_out_of_range:
+                    self.ensure_tag("system:超限采集", "system", "超限采集")
+                    self.tag_item(item_id, "system:超限采集")
             except Exception:
                 self.db.rollback()
         self.db.commit()
@@ -354,3 +361,32 @@ def _coerce_datetime(value):
         except ValueError:
             return None
     return None
+
+
+def _is_out_of_range(
+    published_at: datetime | None,
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> bool:
+    if published_at is None:
+        return False
+    pub = _as_aware_utc(published_at)
+    start = _as_aware_utc(window_start)
+    end = _as_aware_utc(window_end)
+    if start is not None and pub < start:
+        return True
+    if end is not None and pub > end:
+        return True
+    return False
+
+
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _merge_json(existing: dict | None, incoming: dict | None) -> dict:
+    base = existing if isinstance(existing, dict) else {}
+    extra = incoming if isinstance(incoming, dict) else {}
+    return {**base, **extra}

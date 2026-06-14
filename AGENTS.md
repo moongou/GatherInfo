@@ -191,6 +191,12 @@ collect_topic(topic_id)
   → 触发通知发送（fire-and-forget）
 ```
 
+### 内容质量与结构化入库
+- 采集条目入库前先走 `app/content_parser.py` 做本地解析：正文归一化、摘要兜底、国家/年份/数字等轻量实体提取，并写入 `entities` 与 `raw_metadata.content_analysis`。
+- 空白内容、模板导航、版权/登录等少量无实质文本不入库，避免污染报告与搜索结果。
+- 主题采集默认遵循用户配置的 `collect_window_days` 时间窗口；已知 `published_at` 超出窗口但仍满足关键词相关性的条目会保留，并自动打 `system:超限采集` 标签。
+- 关键词过滤规则：1-2 个关键词至少匹配 1 个；3 个及以上关键词至少匹配 2 个，减少单关键词误收。
+
 ---
 
 ## 前端架构
@@ -357,6 +363,7 @@ collect_topic(topic_id)
 ### 自动报告触发
 - 手动采集后触发（`POST /collect` 返回前 fire-and-forget）
 - 定时调度触发（`scheduler._run_topic()` 中同步 await）
+- 智能报告 prompt 先构造“信息集合摘要”（分类分布、来源分布、超限采集数量、关键证据），再附详细条目，要求模型先形成判断再综合成有观点、有层次、有论据的报告。
 
 ---
 

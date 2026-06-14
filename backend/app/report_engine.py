@@ -178,7 +178,7 @@ def _build_item_context(items: list[CollectedItem]) -> list[dict]:
             "id": it.id,
             "index": idx,
             "title": it.title or "",
-            "content": (it.content or "")[:500],
+            "content": (it.content or "")[:2000],
             "summary": (it.summary or "")[:500],
             "url": it.url or "",
             "language": it.language or "unknown",
@@ -191,6 +191,28 @@ def _build_item_context(items: list[CollectedItem]) -> list[dict]:
             "relevance_score": it.relevance_score or 0.0,
         })
     return context
+
+
+def _build_collection_summary_context(items: list[dict]) -> str:
+    """Summarize the information set before asking the LLM to synthesize."""
+    category_counts = _count_by(items, "category", "未分类")
+    source_counts = _count_by(items, "source", "未知来源")
+    out_of_range = [it for it in items if _has_tag_value(it, "超限采集")]
+    evidence_lines = []
+    for item in items[:8]:
+        idx = item.get("index") or "?"
+        title = item.get("title") or "无标题"
+        summary = item.get("summary") or item.get("content") or ""
+        evidence_lines.append(f"- [条目{idx}] {title}：{' '.join(summary.split())[:180]}")
+    return "\n".join([
+        "信息集合摘要",
+        f"- 条目数量: {len(items)} 条",
+        f"- 分类分布: {_format_counts(category_counts)}",
+        f"- 来源分布: {_format_counts(source_counts)}",
+        f"- 超限采集: {len(out_of_range)} 条",
+        "- 关键证据:",
+        *(evidence_lines or ["- 暂无可用证据"]),
+    ])
 
 
 def _build_report_prompt(
@@ -219,6 +241,8 @@ def _build_report_prompt(
         start_str = range_start.strftime("%Y-%m-%d")
         end_str = range_end.strftime("%Y-%m-%d") if range_end else "(不限)"
         range_info = f"数据时间范围: {start_str} ~ {end_str}\n"
+
+    collection_summary = _build_collection_summary_context(items)
 
     # Items text — use enumerate for robust indexing
     items_text_parts = []
@@ -255,11 +279,15 @@ def _build_report_prompt(
 【采集数据】
 本次用于分析的代表性信息共 {len(items)} 条；完整入库条目数以报告元数据为准。
 
+【信息集合摘要】
+{collection_summary}
+
 【详细条目】
 
 {items_text}
 
 【报告要求】
+先基于信息集合摘要形成判断，再用详细条目补充论据，综合写成一篇有观点、有层次、有论据的信息。
 请按照以下结构生成中文报告（约 1500-3000 字）：
 
 1. **执行摘要** — 200字以内的核心结论
@@ -279,6 +307,23 @@ def _build_report_prompt(
 第二部分：150字以内的摘要
 """
     return prompt
+
+
+def _count_by(items: list[dict], key: str, fallback: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = str(item.get(key) or fallback)
+        counts = {**counts, value: counts.get(value, 0) + 1}
+    return counts
+
+
+def _format_counts(counts: dict[str, int]) -> str:
+    return "、".join(f"{key} {value} 条" for key, value in counts.items()) or "暂无"
+
+
+def _has_tag_value(item: dict, value: str) -> bool:
+    tags = item.get("tags") or []
+    return any(tag.get("value") == value for tag in tags if isinstance(tag, dict))
 
 
 def _build_fallback_report(

@@ -107,6 +107,47 @@ class TestPersistItems:
         # Should NOT add because only 1 keyword matches (need >=2)
         mock_db.add.assert_not_called()
 
+    def test_discards_blank_or_noisy_items(self):
+        """Blank or template-like noisy items should be discarded before insert."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        items = [
+            FetchItem(title="   ", content="首页 | 登录 | 版权 © --", url="http://a.com"),
+        ]
+
+        engine._persist_items(items, "src-1", "run-1", topic_id="t1")
+
+        mock_db.add.assert_not_called()
+
+    def test_persists_structured_content_analysis(self):
+        """Meaningful items should persist normalized text plus structured metadata."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        items = [
+            FetchItem(
+                title="USTR updates China tariff exclusions",
+                content=(
+                    "The United States Trade Representative announced China tariff "
+                    "exclusion updates affecting lithium battery imports in 2026."
+                ),
+                url="http://a.com",
+                raw_metadata={"engine": "test"},
+            ),
+        ]
+
+        engine._persist_items(items, "src-1", "run-1", topic_id="t1")
+
+        added = mock_db.add.call_args.args[0]
+        assert added.content == items[0].content
+        assert added.summary
+        assert added.raw_metadata["engine"] == "test"
+        assert added.raw_metadata["content_analysis"]["word_count"] >= 10
+        assert added.entities["countries"]
+
     def test_dedup_skips_existing_items(self):
         """Existing items should be updated, not duplicated."""
         mock_db = MagicMock()
@@ -167,21 +208,24 @@ class TestWindowFiltering:
 
         assert mock_db.add.call_count >= 1
 
-    def test_items_before_window_skipped(self):
-        """Items published before the window should be skipped."""
+    def test_items_before_window_kept_with_out_of_range_tag_when_relevant(self):
+        """Relevant items outside the requested window are kept but tagged."""
         mock_db = MagicMock()
         engine = CollectionEngine(mock_db)
         mock_db.query.return_value.filter.return_value.first.return_value = None
+        engine.ensure_tag = MagicMock()
+        engine.tag_item = MagicMock(return_value=True)
 
         old_date = utc_now() - timedelta(days=30)
         items = [
-            FetchItem(title="Old news", content="body", url="http://a.com",
+            FetchItem(title="Old tariff news", content="trade tariff policy update", url="http://a.com",
                       published_at=old_date),
         ]
 
         window_start = utc_now() - timedelta(days=7)
         engine._persist_items(items, "src-1", "run-1", topic_id="t1",
-                              window_start=window_start)
+                              window_start=window_start, keywords=["tariff"])
 
-        # Should NOT be added
-        mock_db.add.assert_not_called()
+        assert mock_db.add.call_count >= 1
+        engine.ensure_tag.assert_called_with("system:超限采集", "system", "超限采集")
+        engine.tag_item.assert_called_once_with(items[0].item_id("src-1"), "system:超限采集")
